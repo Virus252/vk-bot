@@ -45,7 +45,7 @@ PROFILE_PARSERS = [
     ProfileFieldParser("research_points", re.compile(r'🔎\s*Очки исследования:\s*(\d+)/\d+')),
     ProfileFieldParser("research_max", re.compile(r'🔎\s*Очки исследования:\s*\d+/(\d+)')),
     ProfileFieldParser("upgrades", re.compile(r'⚡\s*Доступных улучшений:\s*(\d+)')),
-    ProfileFieldParser("race", re.compile(r'Раса:\s*(\S+)'), type_cast=str),
+    ProfileFieldParser("race", re.compile(r'🔹\s*([А-ЯЁа-яёA-Za-z]+)\s*\|\s*⚜️'), type_cast=str),
     ProfileFieldParser("phys_def", re.compile(r'Физ.?\s*защита:\s*(\d+)')),
     ProfileFieldParser("magic_def", re.compile(r'Маг.?\s*защита:\s*(\d+)')),
 ]
