@@ -23,24 +23,31 @@ PROFILE_PARSERS = [
     ProfileFieldParser("level", re.compile(r'Уровень:\s*(\d+)')),
     ProfileFieldParser("exp_current", re.compile(r'Опыт:\s*([\d.]+)кк/[\d.]+кк'), type_cast=float),
     ProfileFieldParser("exp_max", re.compile(r'Опыт:\s*[\d.]+кк/([\d.]+)кк'), type_cast=float),
-    ProfileFieldParser("hp", re.compile(r'❤\s Здоровье:\s \d+/(\d+)')),
-    ProfileFieldParser("mana", re.compile(r'💙\s Мана:\s \d+/(\d+)')),
-    ProfileFieldParser("stamina", re.compile(r'🤍\s Стамина:\s \d+/(\d+)')),
-    ProfileFieldParser("strength", re.compile(r'💪\s Сила:\s (\d+)')),
-    ProfileFieldParser("intelligence", re.compile(r'🎓\s Интеллект:\s (\d+)')),
-    ProfileFieldParser("agility", re.compile(r'🌀\s Ловкость:\s (\d+)')),
-    ProfileFieldParser("luck", re.compile(r'🍀\s Удача:\s (\d+)')),
-    ProfileFieldParser("speed", re.compile(r'⚡\s Скорость:\s (\d+)')),
-    ProfileFieldParser("crit", re.compile(r'💥\s Крит:\s ([\d.]+)%'), type_cast=float),
-    ProfileFieldParser("chance", re.compile(r'🎲\s Шанс:\s ([\d.]+)%'), type_cast=float),
-    ProfileFieldParser("cores", re.compile(r'🔮\s Ядер:\s (\d+)')),
-    ProfileFieldParser("rnd", re.compile(r'🪙\s RND:\s (\d+)')),
-    ProfileFieldParser("research_points", re.compile(r'🔬\s Очки исследования:\s (\d+)/\d+')),
-    ProfileFieldParser("research_max", re.compile(r'🔬\s Очки исследования:\s \d+/(\d+)')),
-    ProfileFieldParser("upgrades", re.compile(r'⚡\s Доступных улучшений:\s (\d+)')),
+    
+
+    ProfileFieldParser("hp", re.compile(r'❤(?:\s*Здоровье)?\s*:\s*\d+/(\d+)')),
+    
+   
+    ProfileFieldParser("mana", re.compile(r'💙(?:\s*Мана)?\s*:\s*\d+/(\d+)')),
+    
+   
+    ProfileFieldParser("stamina", re.compile(r'🤍(?:\s*Стамина)?\s*:\s*\d+/(\d+)')),
+    
+    ProfileFieldParser("strength", re.compile(r'💪\s*Сила:\s*(\d+)')),
+    ProfileFieldParser("intelligence", re.compile(r'🎓\s*Интеллект:\s*(\d+)')),
+    ProfileFieldParser("agility", re.compile(r'🌀\s*Ловкость:\s*(\d+)')),
+    ProfileFieldParser("luck", re.compile(r'🍀\s*Удача:\s*(\d+)')),
+    ProfileFieldParser("speed", re.compile(r'(?:🏃\s*Скорость|⚡\s*Скорость):\s*(\d+)')),
+    ProfileFieldParser("crit", re.compile(r'💥\s*Крит:\s*([\d.]+)%'), type_cast=float),
+    ProfileFieldParser("chance", re.compile(r'🎲\s*Шанс:\s*([\d.]+)%'), type_cast=float),
+    ProfileFieldParser("cores", re.compile(r'🔮\s*Ядер:\s*(\d+)')),
+    ProfileFieldParser("rnd", re.compile(r'🪙\s*RND:\s*(\d+)')),
+    ProfileFieldParser("research_points", re.compile(r'🔎\s*Очки исследования:\s*(\d+)/\d+')),
+    ProfileFieldParser("research_max", re.compile(r'🔎\s*Очки исследования:\s*\d+/(\d+)')),
+    ProfileFieldParser("upgrades", re.compile(r'⚡\s*Доступных улучшений:\s*(\d+)')),
     ProfileFieldParser("race", re.compile(r'Раса:\s*(\S+)'), type_cast=str),
-    ProfileFieldParser("phys_def", re.compile(r'Физ.?\s защита:\s (\d+)')),
-    ProfileFieldParser("magic_def", re.compile(r'Маг.?\s защита:\s (\d+)')),
+    ProfileFieldParser("phys_def", re.compile(r'Физ.?\s*защита:\s*(\d+)')),
+    ProfileFieldParser("magic_def", re.compile(r'Маг.?\s*защита:\s*(\d+)')),
 ]
 
 def parse_profile_text(text: str) -> Dict:
