@@ -30,7 +30,7 @@ CLASS_REQUIREMENTS = {
     "Трикстер": {"hp": ">30", "mana": ">20", "stamina": ">20", "strength": ">10", "intelligence": ">10", "agility": ">10", "luck": ">10"},
     "Шулер": {"hp": ">30", "stamina": ">15", "strength": ">10", "agility": ">15", "luck": ">10"},
     "Алый предвестник": {"hp": ">1000", "intelligence": ">500", "mana": ">300", "_special": "time_window_00_03"},
-    "Идущий по грани": {"hp": ">5", "mana": ">20", "stamina": ">20", "strength": ">30", "intelligence": ">30", "agility": ">40", "luck": ">15", "speed": ">5"},
+    "Идущий по грани": {"hp": "==5", "mana": "==20", "stamina": "==20", "strength": "==30", "intelligence": "==30", "agility": "==40", "luck": "==15", "speed": "==5"},
     "Мародер": {"luck": ">500"},
     "Мистический скульптор": {"strength": "<=50", "mana": ">1500", "intelligence": ">1500"},
     "Мученик": {"hp": ">1100", "agility": "==0", "luck": "<=50"},
