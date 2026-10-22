@@ -1,7 +1,8 @@
 from datetime import datetime, time as dt_time
 from typing import Dict, List
 
-# Классы, привязанные к расам
+
+# Классы, привязанные к расам (БЕЗ пробелов!)
 RACE_CLASSES = {
     "Орк": ["Берсерк", "Шаман"],
     "Человек": ["Послушник", "Рыцарь ордена Башни"],
@@ -9,7 +10,7 @@ RACE_CLASSES = {
     "Гоблин": ["Трикстер", "Шулер"],
 }
 
-# Классы, доступные ЛЮБОЙ расе (универсальные)
+# Универсальные классы (БЕЗ пробелов!)
 UNIVERSAL_CLASSES = [
     "Гладиатор", "Бастион", "Жнец", "Алый предвестник",
     "Идущий по грани", "Мародер", "Мистический скульптор",
@@ -17,6 +18,7 @@ UNIVERSAL_CLASSES = [
     "Рунический клинок", "Шут", "Элементалист",
 ]
 
+# Требования к классам (БЕЗ пробелов!)
 CLASS_REQUIREMENTS = {
     "Гладиатор": {"intelligence": "<=99", "strength": ">300", "stamina": ">300"},
     "Бастион": {"stamina": ">500"},
@@ -30,7 +32,7 @@ CLASS_REQUIREMENTS = {
     "Трикстер": {"hp": ">30", "mana": ">20", "stamina": ">20", "strength": ">10", "intelligence": ">10", "agility": ">10", "luck": ">10"},
     "Шулер": {"hp": ">30", "stamina": ">15", "strength": ">10", "agility": ">15", "luck": ">10"},
     "Алый предвестник": {"hp": ">1000", "intelligence": ">500", "mana": ">300", "_special": "time_window_00_03"},
-    "Идущий по грани": {"hp": "==5", "mana": "==20", "stamina": "==20", "strength": "==30", "intelligence": "==30", "agility": "==40", "luck": "==15", "speed": "==5"},
+    "Идущий по грани": {"hp": "=5", "mana": "=20", "stamina": "=20", "strength": "=4", "intelligence": "=2", "agility": "=5", "luck": "=5", "deaths": ">=30"},
     "Мародер": {"luck": ">500"},
     "Мистический скульптор": {"strength": "<=50", "mana": ">1500", "intelligence": ">1500"},
     "Мученик": {"hp": ">1100", "agility": "==0", "luck": "<=50"},
@@ -41,6 +43,7 @@ CLASS_REQUIREMENTS = {
     "Шут": {"intelligence": ">500", "speed": ">200"},
     "Элементалист": {"strength": "<=99", "mana": ">500", "intelligence": ">600"},
 }
+
 
 def check_condition(value, condition: str) -> bool:
     """Проверка условия для стата"""
@@ -58,15 +61,15 @@ def check_condition(value, condition: str) -> bool:
     if condition.startswith("=="): return value == float(condition[2:].strip())
     if condition.startswith(">"): return value > float(condition[1:].strip())
     if condition.startswith("<"): return value < float(condition[1:].strip())
-    
     return False
+
 
 def check_class_eligibility(profile: Dict, status_time_str: str = "") -> List[str]:
     """Проверка доступных классов"""
     eligible = []
     current_time = datetime.now().time()
-    
     status_time_obj = None
+    
     if status_time_str:
         try:
             dt_obj = datetime.strptime(status_time_str, "%d.%m.%Y %H:%M")
@@ -107,6 +110,7 @@ def check_class_eligibility(profile: Dict, status_time_str: str = "") -> List[st
             eligible.append(class_name)
     
     return eligible
+
 
 def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
     """Форматирование разницы профилей"""
@@ -175,7 +179,8 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
         ("hp", "❤ HP"), ("mana", "💙 Мана"), ("stamina", "🤍 Стамина"),
         ("strength", "💪 Сила"), ("intelligence", "🎓 Инт"), ("agility", "🌀 Ловк"),
         ("luck", "🍀 Удача"), ("speed", "⚡ Скор"), ("cores", "🔮 Ядра"),
-        ("rnd", "🪙 RND"), ("research_points", "🔬 Иссл."), ("upgrades", "⚡ Апгр")
+        ("rnd", "🪙 RND"), ("research_points", "🔬 Иссл."), ("upgrades", "⚡ Апгр"),
+        ("deaths", "💀 Смерти"), ("kills", "⚔️ Убийства")
     ]:
         check_change(key, label)
     
@@ -193,34 +198,6 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
     
     return r
 
-def limits_to_profile(limits: Dict, race: str = "") -> Dict:
-    """Преобразование пределов в профиль"""
-    name_to_key = {
-        "Сила": "strength",
-        "Интеллект": "intelligence",
-        "Ловкость": "agility",
-        "Здоровье": "hp",
-        "Мана": "mana",
-        "Стамина": "stamina"
-    }
-    
-    profile = {
-        "level": 0, "exp_current": 0.0, "exp_max": 0.0,
-        "hp": 0, "mana": 0, "stamina": 0,
-        "strength": 0, "intelligence": 0, "agility": 0,
-        "luck": 0, "speed": 0, "crit": 0.0, "chance": 0.0,
-        "min_dmg": 0, "max_dmg": 0, "min_spec": 0, "max_spec": 0,
-        "cores": 0, "rnd": 0, "research_points": 0, "research_max": 0,
-        "upgrades": 0,
-        "race": race, "phys_def": 0, "magic_def": 0
-    }
-    
-    for name, value in limits.items():
-        key = name_to_key.get(name)
-        if key:
-            profile[key] = value
-    
-    return profile
 
 def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
     """Форматирование отчёта по Башне"""
@@ -280,13 +257,18 @@ def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
             eligible_classes = check_class_eligibility(check_profile, "")
             race = check_profile.get("race", "Не определена")
             speed = check_profile.get("speed", 0)
+            deaths = check_profile.get("deaths", 0)
+            phys_def = check_profile.get("phys_def", 0)
+            magic_def = check_profile.get("magic_def", 0)
             
             if eligible_classes:
-                r += f"\n🧬 Раса: {race} | ⚡ Скорость: {speed}\n"
+                r += f"\n🧬 Раса: {race} | ⚡ Скорость: {speed} | 💀 Смерти: {deaths}\n"
+                r += f"🛡 Физ. защита: {phys_def} | 🔮 Маг. защита: {magic_def}\n"
                 r += "🎭 Доступные классы (по пределам):\n"
                 r += "\n".join(f"• {c}" for c in eligible_classes) + "\n"
             else:
-                r += f"\n🧬 Раса: {race} | ⚡ Скорость: {speed}\n"
+                r += f"\n🧬 Раса: {race} | ⚡ Скорость: {speed} | 💀 Смерти: {deaths}\n"
+                r += f"🛡 Физ. защита: {phys_def} | 🔮 Маг. защита: {magic_def}\n"
                 r += "⚠️ По текущим пределам и статам нет доступных классов.\n"
         else:
             r += "\n⚠️ Не удалось найти сохраненный профиль для точной проверки классов.\n"
