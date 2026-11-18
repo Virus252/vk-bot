@@ -4,6 +4,7 @@ import sys
 import signal
 import logging
 import time
+import asyncio
 from config import VK_TOKEN, VK_GROUP_ID
 from database import db
 from handlers import handle_message
@@ -40,45 +41,43 @@ except Exception as e:
     logger.critical(f"❌ Ошибка VK API: {e}")
     sys.exit(1)
 
-# ==========================================
-# ГЛАВНЫЙ ЦИКЛ
-# ==========================================
+
 def graceful_shutdown(signum, frame):
-    """Корректное завершение работы"""
     logger.info("⛔ Остановка...")
     time.sleep(1)
     sys.exit(0)
 
+
 signal.signal(signal.SIGINT, graceful_shutdown)
 signal.signal(signal.SIGTERM, graceful_shutdown)
 
+
+# ==========================================
+# ГЛАВНЫЙ ЦИКЛ
+# ==========================================
 async def main():
-    """Главная функция бота"""
     try:
-        # Инициализация БД
         await db.init()
         await db.start_backup_scheduler()
-        
         logger.info("🤖 Бот запущен.")
-        
-        # Основной цикл обработки событий
+
         while True:
             try:
                 for event in longpoll.listen():
                     if event.type == VkBotEventType.MESSAGE_NEW:
-                        # Передаём vk в обработчик
-                        await handle_message(event, vk)
+                        try:
+                            await handle_message(event, vk)
+                        except Exception as e:
+                            logger.error(f"⚠️ Ошибка обработки сообщения: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"⚠️ Ошибка LongPoll: {e}. Переподключение через 5с...")
-                time.sleep(5)
-    
+                await asyncio.sleep(5)
     except Exception as e:
         logger.critical(f"❌ Критическая ошибка: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        # Закрытие БД при остановке
         await db.close()
 
+
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())

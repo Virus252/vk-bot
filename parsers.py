@@ -14,50 +14,48 @@ class ProfileFieldParser:
         match = self.pattern.search(text)
         if match:
             try:
-                profile[self.key] = self.type_cast(match.group(self.group_index))
+                value = match.group(self.group_index)
+                if self.type_cast is str:
+                    profile[self.key] = str(value).strip()
+                else:
+                    profile[self.key] = self.type_cast(value)
                 return True
             except (ValueError, IndexError):
                 pass
         return False
 
 
-# Все ключи БЕЗ пробелов в конце!
 PROFILE_PARSERS = [
     ProfileFieldParser("level", re.compile(r'Уровень:\s*(\d+)')),
     ProfileFieldParser("exp_current", re.compile(r'Опыт:\s*([\d.]+)кк/[\d.]+кк'), type_cast=float),
     ProfileFieldParser("exp_max", re.compile(r'Опыт:\s*[\d.]+кк/([\d.]+)кк'), type_cast=float),
-    
-    # Поддержка обоих форматов: "❤ Здоровье: 100/100" и "❤: 100/100"
+
     ProfileFieldParser("hp", re.compile(r'❤(?:\s*Здоровье)?\s*:\s*\d+/(\d+)')),
     ProfileFieldParser("mana", re.compile(r'💙(?:\s*Мана)?\s*:\s*\d+/(\d+)')),
     ProfileFieldParser("stamina", re.compile(r'🤍(?:\s*Стамина)?\s*:\s*\d+/(\d+)')),
-    
+
     ProfileFieldParser("strength", re.compile(r'💪\s*Сила:\s*(\d+)')),
     ProfileFieldParser("intelligence", re.compile(r'🎓\s*Интеллект:\s*(\d+)')),
     ProfileFieldParser("agility", re.compile(r'🌀\s*Ловкость:\s*(\d+)')),
     ProfileFieldParser("luck", re.compile(r'🍀\s*Удача:\s*(\d+)')),
-    
-    # Поддержка "⚡ Скорость" и "🏃 Скорость"
     ProfileFieldParser("speed", re.compile(r'(?:⚡|🏃)\s*Скорость:\s*(\d+)')),
-    
+
     ProfileFieldParser("crit", re.compile(r'💥\s*Крит:\s*([\d.]+)%'), type_cast=float),
     ProfileFieldParser("chance", re.compile(r'🎲\s*Шанс:\s*([\d.]+)%'), type_cast=float),
+
     ProfileFieldParser("cores", re.compile(r'🔮\s*Ядер:\s*(\d+)')),
     ProfileFieldParser("rnd", re.compile(r'🪙\s*RND:\s*(\d+)')),
-    
-    # Эмодзи 🔎 (лупа) или 🔬 (микроскоп) - поддержка обоих
     ProfileFieldParser("research_points", re.compile(r'[🔎🔬]\s*Очки исследования:\s*(\d+)/\d+')),
     ProfileFieldParser("research_max", re.compile(r'[🔎🔬]\s*Очки исследования:\s*\d+/(\d+)')),
-    
     ProfileFieldParser("upgrades", re.compile(r'⚡\s*Доступных улучшений:\s*(\d+)')),
-    
-    # НОВЫЙ парсер расы для формата "🔹 Орк | ⚜️ Класс"
+
     ProfileFieldParser("race", re.compile(r'🔹\s*([А-ЯЁа-яёA-Za-z]+)\s*\|'), type_cast=str),
-    
-    ProfileFieldParser("phys_def", re.compile(r'Физ.?\s*защита:\s*(\d+)')),
-    ProfileFieldParser("magic_def", re.compile(r'Маг.?\s*защита:\s*(\d+)')),
-    
-    # === НОВЫЕ ПАРСЕРЫ ДЛЯ "СТАТИСТИКА" ===
+
+    # Защита (🛡 физ / 🌟 маг)
+    ProfileFieldParser("phys_def", re.compile(r'Физ\.?\s*защита:\s*(\d+)')),
+    ProfileFieldParser("magic_def", re.compile(r'Маг\.?\s*защита:\s*(\d+)')),
+
+    # Статистика
     ProfileFieldParser("deaths", re.compile(r'Смерти:\s*(\d+)')),
     ProfileFieldParser("kills", re.compile(r'Убийства:\s*(\d+)')),
     ProfileFieldParser("cores_embodied", re.compile(r'Воплощено ядер:\s*(\d+)')),
@@ -78,24 +76,23 @@ def parse_profile_text(text: str) -> Dict:
         "cores": 0, "rnd": 0, "research_points": 0, "research_max": 0,
         "upgrades": 0,
         "race": "", "phys_def": 0, "magic_def": 0,
-        # Новые поля для статистики
         "deaths": 0, "kills": 0, "cores_embodied": 0,
         "oi_spent": 0, "fisher_level": 0, "fish_caught": 0
     }
-    
+
     dmg_match = re.search(r'(?:Урон|Атака|🗡):\s*(\d+)-(\d+)', text)
     if dmg_match:
         profile["min_dmg"] = int(dmg_match.group(1))
         profile["max_dmg"] = int(dmg_match.group(2))
-    
-    spec_match = re.search(r'(?:Спец.|Специальный|✨):\s*(\d+)-(\d+)', text)
+
+    spec_match = re.search(r'(?:Спец\.|Специальный|✨):\s*(\d+)-(\d+)', text)
     if spec_match:
         profile["min_spec"] = int(spec_match.group(1))
         profile["max_spec"] = int(spec_match.group(2))
-    
+
     for parser in PROFILE_PARSERS:
         parser.parse(text, profile)
-    
+
     return profile
 
 
@@ -109,16 +106,19 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
         "gear_items": 0, "diamond_items": 0,
         "messages_count": len(fwd),
         "limits": {},
-        "op_points": 0
+        "op_points": 0,
+        "cores_opened": 0
     }
-    
+
     limited_fwd = fwd[:MAX_FWD_MESSAGES]
     txt = "\n".join(m.get('text', '') for m in limited_fwd)
+
     if not txt:
         return stats
-    
+
     lines = txt.split('\n')
-    
+
+    # === Предметы ===
     for line in lines:
         if 'Вам выпало:' in line:
             count_match = re.search(r'\(х(\d+)\)', line)
@@ -128,26 +128,30 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
             elif '⚫' in line: stats["black_items"] += c
             elif '⚙' in line: stats["gear_items"] += c
             elif '💠' in line: stats["diamond_items"] += c
-    
+
+    # === Материалы ===
     sharpening_matches = re.findall(r'[Кк]амень заточки\s*\(х(\d+)\)', txt)
     if sharpening_matches:
         stats["sharpening_stone"] = sum(int(x) for x in sharpening_matches)
-    
+
     stone_simple = re.findall(r'(?<!заточки )[Кк]амень\s*[xхX](\d+)', txt)
     stone_emoji = re.findall(r'🧱.*?[xх\(]\s*(\d+)', txt)
     stats["stone"] = sum(int(x) for x in stone_simple) + sum(int(x) for x in stone_emoji)
-    
+
     wood_paren = re.findall(r'[Дд]ревесина\s*\(х(\d+)\)', txt)
     wood_simple = re.findall(r'[Дд]ревесина\s*[xхX](\d+)', txt)
     wood_emoji = re.findall(r'🪵.*?[xх\(]\s*(\d+)', txt)
-    stats["wood"] = sum(int(x) for x in wood_paren) + sum(int(x) for x in wood_simple) + sum(int(x) for x in wood_emoji)
-    
+    stats["wood"] = (sum(int(x) for x in wood_paren)
+                     + sum(int(x) for x in wood_simple)
+                     + sum(int(x) for x in wood_emoji))
+
+    # === Характеристики ===
     char_map = {
         "strength": ["💪", "Сила"],
         "agility": ["🌀", "Ловкость"],
         "intelligence": ["🎓", "Интеллект"]
     }
-    
+
     for stat_key, identifiers in char_map.items():
         emoji, name_ru = identifiers
         for line in lines:
@@ -160,22 +164,40 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
                         stats[stat_key] -= total
                     elif 'увеличена' in line.lower() or '⬆️' in line:
                         stats[stat_key] += total
-    
+
+    # === Служебное (не выводится в отчёте) ===
     if cm := re.search(r'🔮\s*Осталось ядер:\s*(\d+)', txt):
         stats["cores_left"] = int(cm.group(1))
-    
+
     if sl := re.search(r'🎒\s*Свободных слотов инвентаря:\s*(\d+)', txt):
         stats["inventory_slots"] = int(sl.group(1))
-    
+
+    # === ВСКРЫТО ЯДЕР ===
+    opened_patterns = [
+        r'Вскрыто ядер:\s*(\d+)',
+        r'Ядер вскрыто:\s*(\d+)',
+        r'Всего вскрыто(?: ядер)?:\s*(\d+)',
+        r'🔮\s*Вскрыто:\s*(\d+)',
+        r'Вскрытие ядра:\s*(\d+)',
+    ]
+    for pattern in opened_patterns:
+        matches = re.findall(pattern, txt, re.IGNORECASE)
+        if matches:
+            stats["cores_opened"] = max(int(x) for x in matches)
+            break
+
+    # Фолбэк: считаем сами сообщения о вскрытии
+    if not stats["cores_opened"]:
+        cnt = len(re.findall(r'(?:Вы вскрыли ядро|Вскрытие ядра)', txt, re.IGNORECASE))
+        if cnt:
+            stats["cores_opened"] = cnt
+
+    # === Пределы ===
     limit_pattern = re.compile(r'(💪|🎓|🌀|❤|💙|🤍)\s*([^:]+):\s*\d+\s*\(Предел\s*(\d+)\)')
-    limits_found = limit_pattern.findall(txt)
-    if limits_found:
-        for emoji, name, limit_val in limits_found:
-            name_clean = name.strip()
-            stats["limits"][name_clean] = int(limit_val)
-    
-    op_match = re.search(r'🧬\s*Очки предела\s*\(ОП\):\s*(\d+)', txt)
-    if op_match:
+    for emoji, name, limit_val in limit_pattern.findall(txt):
+        stats["limits"][name.strip()] = int(limit_val)
+
+    if op_match := re.search(r'🧬\s*Очки предела\s*\(ОП\):\s*(\d+)', txt):
         stats["op_points"] = int(op_match.group(1))
-    
+
     return stats
