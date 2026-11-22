@@ -20,9 +20,7 @@ class Database:
         self._backup_task = None
 
     async def init(self):
-        """Инициализация БД и создание таблиц"""
         async with aiosqlite.connect(self.db_path) as db:
-            # Общие заметки гильдии
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +31,6 @@ class Database:
                 )
             """)
 
-            # Роли пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS user_roles (
                     user_id INTEGER PRIMARY KEY,
@@ -41,7 +38,6 @@ class Database:
                 )
             """)
 
-            # Снимки профилей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS profiles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,7 +47,6 @@ class Database:
                 )
             """)
 
-            # Ожидание ответа "Статус"
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS waiting_status (
                     peer_id INTEGER PRIMARY KEY,
@@ -61,8 +56,6 @@ class Database:
             """)
 
             await db.commit()
-
-            # Миграция старой таблицы заметок (если была личная)
             await self._migrate_notes(db)
 
             await db.execute("CREATE INDEX IF NOT EXISTS idx_notes_author ON notes(author_id)")
@@ -72,7 +65,7 @@ class Database:
             logger.info(f"✅ База данных инициализирована: {self.db_path}")
 
     async def _migrate_notes(self, db):
-        """Перенос старой таблицы notes (user_id) в новую (author_id)"""
+        """Перенос старой таблицы заметок (user_id) в новую (author_id)"""
         cursor = await db.execute("PRAGMA table_info(notes)")
         cols = [row[1] for row in await cursor.fetchall()]
         if "author_id" in cols or "user_id" not in cols:
@@ -100,9 +93,6 @@ class Database:
             logger.error(f"Ошибка миграции заметок: {e}")
             await db.rollback()
 
-    # ==========================================
-    # БЭКАПЫ
-    # ==========================================
     async def start_backup_scheduler(self):
         self._backup_task = asyncio.create_task(self._backup_loop())
         logger.info(f"💾 Планировщик бэкапов запущен (интервал: {self.backup_interval}с)")
@@ -135,9 +125,7 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка создания бэкапа: {e}")
 
-    # ==========================================
-    # РОЛИ
-    # ==========================================
+    # === РОЛИ ===
     async def get_user_role(self, user_id: int) -> str:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
@@ -162,9 +150,7 @@ class Database:
             rows = await cursor.fetchall()
             return [{"user_id": r[0], "role": r[1]} for r in rows]
 
-    # ==========================================
-    # ОБЩИЕ ЗАМЕТКИ
-    # ==========================================
+    # === ОБЩИЕ ЗАМЕТКИ ===
     async def add_note_global(self, author_id: int, text: str, role: str) -> Union[Dict, str, None]:
         if len(text) > MAX_NOTE_LENGTH:
             return None
@@ -211,9 +197,7 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
 
-    # ==========================================
-    # ПРОФИЛИ
-    # ==========================================
+    # === ПРОФИЛИ ===
     async def save_profile_snapshot(self, user_id: int, data: Dict, timestamp: str):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -240,9 +224,7 @@ class Database:
             rows = await cursor.fetchall()
             return [{"data": json.loads(r[0]), "timestamp": r[1]} for r in rows]
 
-    # ==========================================
-    # ОЖИДАНИЕ СТАТУСА
-    # ==========================================
+    # === ОЖИДАНИЕ СТАТУСА ===
     async def add_waiting_status(self, peer_id: int, user_id: int):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -281,5 +263,4 @@ class Database:
         logger.info("🔒 База данных закрыта")
 
 
-# Глобальный экземпляр
 db = Database()

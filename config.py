@@ -57,8 +57,8 @@ BACKUP_INTERVAL_HOURS = int(os.getenv("BACKUP_INTERVAL_HOURS", 24))
 # ==========================================
 # Rate limiting
 # ==========================================
-RATE_LIMIT_MESSAGES = 5   # Макс сообщений за период
-RATE_LIMIT_PERIOD = 10    # Период в секундах
+RATE_LIMIT_MESSAGES = 5
+RATE_LIMIT_PERIOD = 10
 
 # ==========================================
 # Валидация
@@ -78,12 +78,12 @@ BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 # СИСТЕМА РОЛЕЙ (Гильдия)
 # ==========================================
 ROLE_HIERARCHY = {
-    "GuildMaster": 5,    # Глава гильдии
-    "Deputy": 4,         # Зам главы
-    "Cardinal": 3,       # Кардинал
-    "Captain": 3,        # Капитан
-    "Lieutenant": 2,     # Лейтенант
-    "Private": 1         # Рядовой
+    "GuildMaster": 5,
+    "Deputy": 4,
+    "Cardinal": 3,
+    "Captain": 3,
+    "Lieutenant": 2,
+    "Private": 1
 }
 
 ROLE_NAMES_RU = {
@@ -104,7 +104,6 @@ ROLE_NAMES_FROM_RU = {
     "капитан": "Captain",
     "лейтенант": "Lieutenant",
     "рядовой": "Private",
-    # английские варианты
     "guildmaster": "GuildMaster",
     "deputy": "Deputy",
     "cardinal": "Cardinal",
@@ -117,4 +116,4 @@ ROLE_NAMES_FROM_RU = {
 # МУТ
 # ==========================================
 MUTE_ALLOWED_ROLES = ["GuildMaster", "Deputy", "Cardinal"]
-DEFAULT_MUTE_DURATION = int(os.getenv("DEFAULT_MUTE_DURATION", 3600))  # 1 час
+DEFAULT_MUTE_DURATION = int(os.getenv("DEFAULT_MUTE_DURATION", 3600))

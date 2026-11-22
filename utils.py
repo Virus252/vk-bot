@@ -7,9 +7,6 @@ from config import VK_GROUP_ID, VALID_NOTE_CHARS
 
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# Rate limiting
-# ==========================================
 rate_limits: Dict[int, list] = defaultdict(list)
 
 
@@ -25,7 +22,6 @@ def check_rate_limit(user_id: int) -> bool:
 
 
 def validate_note_text(text: str) -> bool:
-    """Валидация текста заметки"""
     if not text or len(text.strip()) == 0:
         return False
     for char in text:
@@ -35,9 +31,7 @@ def validate_note_text(text: str) -> bool:
     return True
 
 
-# ==========================================
-# Упоминания бота
-# ==========================================
+# Исправленная регулярка для упоминаний
 RE_MENTION = re.compile(r'\[(?:club' + str(VK_GROUP_ID) + r'|[^\]]+)\]')
 RE_STATUS_CMD = re.compile(r'^статус$', re.IGNORECASE)
 
@@ -50,9 +44,6 @@ def extract_command(text: str) -> str:
     return RE_MENTION.sub('', text).strip()
 
 
-# ==========================================
-# Метрики
-# ==========================================
 metrics: Dict[str, int] = defaultdict(int)
 
 

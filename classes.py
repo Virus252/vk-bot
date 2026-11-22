@@ -1,7 +1,6 @@
 from datetime import datetime, time as dt_time
 from typing import Dict, List
 
-# Классы, привязанные к расам
 RACE_CLASSES = {
     "Орк": ["Берсерк", "Шаман"],
     "Человек": ["Послушник", "Рыцарь ордена Башни"],
@@ -18,7 +17,7 @@ UNIVERSAL_CLASSES = [
 
 CLASS_REQUIREMENTS = {
     "Гладиатор": {"intelligence": "<=99", "strength": ">300", "stamina": ">300"},
-    "Бастион": {"stamina": ">500"},
+    "Бастион": {"stamina": ">500", "phys_def": ">300", "magic_def": ">300"},
     "Жнец": {"hp": ">300", "mana": ">15", "intelligence": ">15"},
     "Берсерк": {"hp": ">30", "strength": ">15", "stamina": ">20"},
     "Шаман": {"mana": ">50", "intelligence": ">20"},
@@ -43,7 +42,6 @@ CLASS_REQUIREMENTS = {
 
 
 def check_condition(value, condition: str) -> bool:
-    """Проверка условия для стата"""
     condition = condition.strip()
     if '-' in condition and not any(op in condition for op in ['>', '<', '=']):
         try:
@@ -64,7 +62,6 @@ def check_condition(value, condition: str) -> bool:
 
 
 def check_class_eligibility(profile: Dict, status_time_str: str = "") -> List[str]:
-    """Проверка доступных классов"""
     eligible = []
     current_time = datetime.now().time()
     status_time_obj = None
@@ -109,7 +106,6 @@ def check_class_eligibility(profile: Dict, status_time_str: str = "") -> List[st
 
 
 def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
-    """Форматирование разницы профилей"""
     try:
         dt_old = datetime.fromisoformat(ts_old)
         dt_new = datetime.fromisoformat(ts_new)
@@ -169,7 +165,7 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
             exp_str = f"{sign}{int(round(diff_exp_absolute))}"
         ch.append(f"⭐ Опыт: {exp_str}")
 
-    # Все остальные статы (включая защиту)
+    # Все статы, ВКЛЮЧАЯ ФИЗ И МАГ ЗАЩИТУ
     for key, label in [
         ("hp", "❤ HP"), ("mana", "💙 Мана"), ("stamina", "🤍 Стамина"),
         ("strength", "💪 Сила"), ("intelligence", "🎓 Инт"), ("agility", "🌀 Ловк"),
@@ -196,7 +192,6 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
 
 
 def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
-    """Форматирование отчёта по Башне"""
     has = any([
         s.get("stone"), s.get("sharpening_stone"), s.get("wood"),
         s.get("strength"), s.get("agility"), s.get("intelligence"),
@@ -215,7 +210,6 @@ def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
     if s.get("cores_opened"):
         r += f"🔮 Вскрыто ядер: {s['cores_opened']}\n\n"
 
-    # Предметы
     items = []
     if s.get("gold_items"): items.append(f"🟡 Легендарные: {s['gold_items']}")
     if s.get("red_items"): items.append(f"🔴 Мифические: {s['red_items']}")
@@ -226,7 +220,6 @@ def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
     if items:
         r += "🎁 Предметы:\n" + "\n".join(items) + "\n\n"
 
-    # Материалы
     mats = []
     if s.get("stone"): mats.append(f"🧱 Камень: +{s['stone']}")
     if s.get("sharpening_stone"): mats.append(f"🧿 Камень заточки: +{s['sharpening_stone']}")
@@ -235,7 +228,6 @@ def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
     if mats:
         r += "🧱 Материалы:\n" + "\n".join(mats) + "\n\n"
 
-    # Характеристики
     chars = []
     for k, l in [("strength", "💪 Сила"), ("agility", "🌀 Ловк"), ("intelligence", "🎓 Инт")]:
         if s.get(k):
@@ -244,7 +236,6 @@ def format_tower_report(s: Dict, user_profile: Dict = None) -> str:
     if chars:
         r += "✨ Характеристики:\n" + "\n".join(chars) + "\n\n"
 
-    # Очки предела
     if s.get("op_points"):
         r += f"🧬 Очки предела (ОП): {s['op_points']}\n"
 

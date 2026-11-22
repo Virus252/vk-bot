@@ -5,6 +5,7 @@ from datetime import datetime
 from database import db
 from parsers import parse_profile_text, parse_tower_messages, PROFILE_PARSERS
 from classes import check_class_eligibility, format_diff, format_tower_report
+from sets import format_category, SET_CATEGORIES
 from utils import (check_rate_limit, validate_note_text, is_bot_mentioned,
                    extract_command, increment_metric)
 from config import (MAX_NOTE_LENGTH, MAX_GLOBAL_NOTES, MAX_FWD_MESSAGES,
@@ -36,7 +37,6 @@ def resolve_user_id(vk, raw: str):
     if not raw:
         return None, "❌ Не указан пользователь"
 
-    # VK-упоминание вида [id123456|Имя]
     m = re.match(r'^\[id(\d+)\|[^\]]*\]$', raw)
     if m:
         return int(m.group(1)), None
@@ -88,8 +88,7 @@ def get_display_name(vk, user_id: int) -> str:
 
 def format_duration(seconds: int) -> str:
     if seconds % 86400 == 0:
-        d = seconds // 86400
-        return f"{d} дн."
+        return f"{seconds // 86400} дн."
     if seconds % 3600 == 0:
         return f"{seconds // 3600} ч."
     if seconds % 60 == 0:
@@ -232,9 +231,9 @@ async def handle_message(event, vk):
 
     parts = clean_text.split(maxsplit=2)
     cmd = parts[0].lower()
-    args = parts[1].strip() if len(parts) > 1 else ""      # первый аргумент
-    arg2 = parts[2].strip() if len(parts) > 2 else ""      # всё остальное
-    full_args = clean_text[len(parts[0]):].strip()         # весь текст после команды
+    args = parts[1].strip() if len(parts) > 1 else ""
+    arg2 = parts[2].strip() if len(parts) > 2 else ""
+    full_args = clean_text[len(parts[0]):].strip()
 
     # Роль пользователя
     user_role = await db.get_user_role(from_id)
@@ -243,13 +242,24 @@ async def handle_message(event, vk):
         user_role = "GuildMaster"
     user_level = ROLE_HIERARCHY.get(user_role, 1)
 
+    # Определение команд
     is_add_cmd = cmd in ["/add", "/добавить", "/добав", "/заметка"]
     is_list_cmd = cmd in ["/list", "/заметки", "/список", "/летопись"]
     is_del_cmd = cmd in ["/del", "/удалить", "/удал"]
     is_role_cmd = cmd in ["/role", "/роль", "/назначить", "/ранг"]
+    is_roles_cmd = cmd in ["/roles", "/роли", "/списокролей", "/ранги"]
     is_mute_cmd = cmd in ["/mute", "/мут", "/заглушить"]
     is_unmute_cmd = cmd in ["/unmute", "/размут", "/снятьмут", "/разглушить"]
     is_myrole_cmd = cmd in ["/myrole", "/мояроль", "/мойранг"]
+
+    # Команды сетов
+    is_set_phys_cmd = cmd in ["/сетфиз", "/сетфизический", "/setphys"]
+    is_set_mp_cmd = cmd in ["/сетмп", "/сетмана", "/setmp"]
+    is_set_hp_cmd = cmd in ["/сехп", "/сетздоровье", "/sethp"]
+    is_set_magic_cmd = cmd in ["/сетмаг", "/сетмагический", "/setmagic"]
+    is_set_st_cmd = cmd in ["/сетст", "/сетстамина", "/setst"]
+    is_set_def_cmd = cmd in ["/сетдеф", "/сетзащита", "/setdef"]
+
     is_help_cmd = cmd in ["/help", "/помощь", "/справка"]
     is_start_cmd = cmd in ["/start", "/старт", "/начать"]
 
@@ -346,8 +356,7 @@ async def handle_message(event, vk):
                          "Примеры:\n"
                          "• /роль 123456789 Капитан\n"
                          "• /роль @wodyano1 Капитан\n"
-                         "• /роль vodyano1 Зам главы\n"
-                         "• /роль https://vk.com/wodyano1 Кардинал\n\n"
+                         "• /роль vodyano1 Зам главы\n\n"
                          "Ранги: Глава, Зам, Кардинал, Капитан, Лейтенант, Рядовой")
             return
 
@@ -368,6 +377,63 @@ async def handle_message(event, vk):
                      f"✅ Пользователю {get_display_name(vk, target_id)} присвоен ранг: {ru_role}")
         increment_metric("roles_assigned")
 
+    # ---------- СПИСОК РОЛЕЙ ----------
+    elif is_roles_cmd:
+        all_roles = await db.get_all_roles()
+
+        if not all_roles:
+            send_message(vk, peer_id,
+                         "📋 В гильдии пока нет назначенных ролей.\n\n"
+                         "💡 Все пользователи по умолчанию — 🪖 Рядовые.\n"
+                         "Используйте /роль [@ник] [ранг] для назначения (только Глава).")
+            return
+
+        # Группируем по ролям
+        roles_by_rank = {role: [] for role in ROLE_HIERARCHY.keys()}
+        for entry in all_roles:
+            role = entry['role']
+            if role in roles_by_rank:
+                roles_by_rank[role].append(entry['user_id'])
+
+        # Получаем имена всех пользователей одним батч-запросом
+        all_user_ids = [uid for uids in roles_by_rank.values() for uid in uids]
+        user_names = {}
+
+        if all_user_ids:
+            try:
+                batch_size = 500
+                for i in range(0, len(all_user_ids), batch_size):
+                    batch = all_user_ids[i:i + batch_size]
+                    users_info = vk.users.get(user_ids=batch, fields=['screen_name'])
+                    for u in users_info:
+                        uid = u['id']
+                        screen = u.get('screen_name')
+                        if screen:
+                            user_names[uid] = f"@{screen}"
+                        else:
+                            user_names[uid] = f"{u['first_name']} {u['last_name']}".strip()
+            except Exception as e:
+                logger.error(f"Ошибка получения имён пользователей: {e}")
+
+        # Формируем ответ
+        t = "📋 Роли гильдии:\n\n"
+
+        for role_key in ["GuildMaster", "Deputy", "Cardinal", "Captain", "Lieutenant", "Private"]:
+            role_name = ROLE_NAMES_RU.get(role_key, role_key)
+            users = roles_by_rank.get(role_key, [])
+
+            if users:
+                t += f"{role_name} ({len(users)}):\n"
+                for uid in users:
+                    name = user_names.get(uid, f"ID: {uid}")
+                    t += f"  • {name} (ID: {uid})\n"
+                t += "\n"
+
+        t += "💡 Все остальные пользователи по умолчанию — 🪖 Рядовые"
+
+        send_message(vk, peer_id, t)
+        increment_metric("roles_listed")
+
     # ---------- МОЯ РОЛЬ ----------
     elif is_myrole_cmd:
         ru_role = ROLE_NAMES_RU.get(user_role, user_role)
@@ -386,10 +452,6 @@ async def handle_message(event, vk):
         if not args:
             send_message(vk, peer_id,
                          "❌ Использование: /мут [@ник или id] [причина]\n"
-                         "Примеры:\n"
-                         "• /мут 123456789 Спам\n"
-                         "• /мут @wodyano1 Флуд\n"
-                         "• /мут vodyano1\n\n"
                          f"⏳ Длительность по умолчанию: {format_duration(DEFAULT_MUTE_DURATION)}")
             return
 
@@ -446,11 +508,7 @@ async def handle_message(event, vk):
             return
 
         if not args:
-            send_message(vk, peer_id,
-                         "❌ Использование: /размут [@ник или id]\n"
-                         "Примеры:\n"
-                         "• /размут 123456789\n"
-                         "• /размут @wodyano1")
+            send_message(vk, peer_id, "❌ Использование: /размут [@ник или id]")
             return
 
         target_id, err = resolve_user_id(vk, args)
@@ -469,6 +527,42 @@ async def handle_message(event, vk):
             else:
                 send_message(vk, peer_id, f"❌ Ошибка размута: {e}")
 
+    # ---------- СЕТЫ: ФИЗИЧЕСКИЙ ----------
+    elif is_set_phys_cmd:
+        result = format_category("phys")
+        send_message(vk, peer_id, f"🔥 Сеты для физического урона:\n\n{result}")
+        increment_metric("sets_viewed")
+
+    # ---------- СЕТЫ: МАНА ----------
+    elif is_set_mp_cmd:
+        result = format_category("mp")
+        send_message(vk, peer_id, f"💙 Сеты для маны:\n\n{result}")
+        increment_metric("sets_viewed")
+
+    # ---------- СЕТЫ: ЗДОРОВЬЕ ----------
+    elif is_set_hp_cmd:
+        result = format_category("hp")
+        send_message(vk, peer_id, f"❤️ Сеты для здоровья:\n\n{result}")
+        increment_metric("sets_viewed")
+
+    # ---------- СЕТЫ: МАГИЧЕСКИЙ ----------
+    elif is_set_magic_cmd:
+        result = format_category("magic")
+        send_message(vk, peer_id, f"🔮 Сеты для магического урона:\n\n{result}")
+        increment_metric("sets_viewed")
+
+    # ---------- СЕТЫ: СТАМИНА ----------
+    elif is_set_st_cmd:
+        result = format_category("stamina")
+        send_message(vk, peer_id, f"🤍 Сеты для стамины:\n\n{result}")
+        increment_metric("sets_viewed")
+
+    # ---------- СЕТЫ: ЗАЩИТА ----------
+    elif is_set_def_cmd:
+        result = format_category("def")
+        send_message(vk, peer_id, f"🛡️ Сеты для защиты:\n\n{result}")
+        increment_metric("sets_viewed")
+
     # ---------- СПРАВКА ----------
     elif is_help_cmd:
         h = ("📖 Команды гильдии:\n"
@@ -476,18 +570,24 @@ async def handle_message(event, vk):
              "/заметки — читать летопись (Все)\n"
              "/удалить [номер] — удалить запись (Зам главы+)\n"
              "/роль [@ник или id] [ранг] — назначить ранг (Глава)\n"
+             "/роли — посмотреть всех с ролями (Все)\n"
              "/мояроль — показать свой ранг\n"
-             "/мут [@ник или id] [причина] — заглушить на 1 час (Глава/Зам/Кардинал)\n"
-             "/размут [@ник или id] — снять заглушение (Глава/Зам/Кардинал)\n"
-             "/помощь — эта справка\n\n"
-             "🎖 Ранги: 👑 Глава гильдии → ⚔️ Зам главы → 📿 Кардинал → "
+             "/мут [@ник или id] [причина] — заглушить (Глава/Зам/Кардинал)\n"
+             "/размут [@ник или id] — снять заглушение (Глава/Зам/Кардинал)\n\n"
+             "🎖 Ранги: 👑 Глава → ⚔️ Зам → 📿 Кардинал → "
              "🛡️ Капитан → 🎖️ Лейтенант → 🪖 Рядовой\n\n"
              "🏰 Tower of Random:\n"
-             "• Перешлите ядра — посчитаю (тегать не надо)\n"
-             "• Перешлите статы с пределами — покажу доступные классы\n"
-             "• '@бот статус' — дождусь ответа и покажу динамику\n\n"
-             "💡 Английские аналоги: /add, /list, /del, /role, /mute, /unmute, /help\n"
-             "💡 Работают и в ЛС, и в чатах (кроме /мут и /размут — только в беседах)")
+             "• Перешлите ядра — посчитаю\n"
+             "• Перешлите статы — покажу классы\n"
+             "• '@бот статус' — динамика профиля\n\n"
+             "⚔️ Сеты брони:\n"
+             "• /сетФиз — Сет Гнева + Выносливости\n"
+             "• /сетМп — Сет Шторма + Тайн + Баланса\n"
+             "• /сетХп — Сет Страданий + Вечности + Баланса\n"
+             "• /сетМаг — Сет Звёзд + Тайн\n"
+             "• /сетСт — Сет Выносливости + Баланса\n"
+             "• /сетДеф — Сет Патриота + Выносливости\n\n"
+             "💡 Английские аналоги: /add, /list, /del, /role, /roles, /mute, /unmute, /help")
         send_message(vk, peer_id, h)
         increment_metric("help_shown")
 

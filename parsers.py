@@ -55,7 +55,6 @@ PROFILE_PARSERS = [
     ProfileFieldParser("phys_def", re.compile(r'Физ\.?\s*защита:\s*(\d+)')),
     ProfileFieldParser("magic_def", re.compile(r'Маг\.?\s*защита:\s*(\d+)')),
 
-    # Статистика
     ProfileFieldParser("deaths", re.compile(r'Смерти:\s*(\d+)')),
     ProfileFieldParser("kills", re.compile(r'Убийства:\s*(\d+)')),
     ProfileFieldParser("cores_embodied", re.compile(r'Воплощено ядер:\s*(\d+)')),
@@ -66,7 +65,6 @@ PROFILE_PARSERS = [
 
 
 def parse_profile_text(text: str) -> Dict:
-    """Парсинг текста профиля или статистики"""
     profile = {
         "level": 0, "exp_current": 0.0, "exp_max": 0.0,
         "hp": 0, "mana": 0, "stamina": 0,
@@ -97,7 +95,6 @@ def parse_profile_text(text: str) -> Dict:
 
 
 def parse_tower_messages(fwd: List[Dict]) -> Dict:
-    """Парсинг сообщений Башни"""
     stats = {
         "stone": 0, "sharpening_stone": 0, "wood": 0,
         "strength": 0, "agility": 0, "intelligence": 0,
@@ -118,7 +115,6 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
 
     lines = txt.split('\n')
 
-    # === Предметы ===
     for line in lines:
         if 'Вам выпало:' in line:
             count_match = re.search(r'\(х(\d+)\)', line)
@@ -129,7 +125,6 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
             elif '⚙' in line: stats["gear_items"] += c
             elif '💠' in line: stats["diamond_items"] += c
 
-    # === Материалы ===
     sharpening_matches = re.findall(r'[Кк]амень заточки\s*\(х(\d+)\)', txt)
     if sharpening_matches:
         stats["sharpening_stone"] = sum(int(x) for x in sharpening_matches)
@@ -145,7 +140,6 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
                      + sum(int(x) for x in wood_simple)
                      + sum(int(x) for x in wood_emoji))
 
-    # === Характеристики ===
     char_map = {
         "strength": ["💪", "Сила"],
         "agility": ["🌀", "Ловкость"],
@@ -165,20 +159,18 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
                     elif 'увеличена' in line.lower() or '⬆️' in line:
                         stats[stat_key] += total
 
-    # === Служебное (не выводится в отчёте) ===
     if cm := re.search(r'🔮\s*Осталось ядер:\s*(\d+)', txt):
         stats["cores_left"] = int(cm.group(1))
 
     if sl := re.search(r'🎒\s*Свободных слотов инвентаря:\s*(\d+)', txt):
         stats["inventory_slots"] = int(sl.group(1))
 
-    # === ВСКРЫТО ЯДЕР ===
+    # ВСКРЫТО ЯДЕР
     opened_patterns = [
         r'Вскрыто ядер:\s*(\d+)',
         r'Ядер вскрыто:\s*(\d+)',
         r'Всего вскрыто(?: ядер)?:\s*(\d+)',
         r'🔮\s*Вскрыто:\s*(\d+)',
-        r'Вскрытие ядра:\s*(\d+)',
     ]
     for pattern in opened_patterns:
         matches = re.findall(pattern, txt, re.IGNORECASE)
@@ -186,13 +178,11 @@ def parse_tower_messages(fwd: List[Dict]) -> Dict:
             stats["cores_opened"] = max(int(x) for x in matches)
             break
 
-    # Фолбэк: считаем сами сообщения о вскрытии
     if not stats["cores_opened"]:
         cnt = len(re.findall(r'(?:Вы вскрыли ядро|Вскрытие ядра)', txt, re.IGNORECASE))
         if cnt:
             stats["cores_opened"] = cnt
 
-    # === Пределы ===
     limit_pattern = re.compile(r'(💪|🎓|🌀|❤|💙|🤍)\s*([^:]+):\s*\d+\s*\(Предел\s*(\d+)\)')
     for emoji, name, limit_val in limit_pattern.findall(txt):
         stats["limits"][name.strip()] = int(limit_val)

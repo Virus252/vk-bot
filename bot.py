@@ -9,9 +9,6 @@ from config import VK_TOKEN, VK_GROUP_ID
 from database import db
 from handlers import handle_message
 
-# ==========================================
-# ЛОГИРОВАНИЕ
-# ==========================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -22,16 +19,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==========================================
-# ПРОВЕРКА ТОКЕНА
-# ==========================================
 if not VK_TOKEN:
     logger.critical("❌ Токен VK_TOKEN не найден в .env файле!")
     sys.exit(1)
 
-# ==========================================
-# ИНИЦИАЛИЗАЦИЯ VK API
-# ==========================================
 try:
     vk_session = vk_api.VkApi(token=VK_TOKEN)
     vk = vk_session.get_api()
@@ -52,9 +43,6 @@ signal.signal(signal.SIGINT, graceful_shutdown)
 signal.signal(signal.SIGTERM, graceful_shutdown)
 
 
-# ==========================================
-# ГЛАВНЫЙ ЦИКЛ
-# ==========================================
 async def main():
     try:
         await db.init()
@@ -81,3 +69,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
