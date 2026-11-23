@@ -178,10 +178,9 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
 
     check_change("crit", "💥 Крит")
     check_change("chance", "🎲 Шанс")
-    check_change("min_dmg", "🗡 Мин.урон")
-    check_change("max_dmg", "🗡 Макс.урон")
-    check_change("min_spec", "✨ Мин.спец")
-    check_change("max_spec", "✨ Макс.спец")
+    check_change("phys_dmg", "🗡 Физ.урон")
+    check_change("mag_dmg", "✨ Маг. урон")
+
 
     if not ch:
         r += "✅ Изменений не обнаружено.\n"
