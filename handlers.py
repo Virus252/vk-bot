@@ -6,6 +6,7 @@ from database import db
 from parsers import parse_profile_text, parse_tower_messages, PROFILE_PARSERS
 from classes import check_class_eligibility, format_diff, format_tower_report
 from sets import format_category, SET_CATEGORIES
+from escrow import parse_items_from_text, format_lot_display, get_user_rating_display
 from utils import (check_rate_limit, validate_note_text, is_bot_mentioned,
                    extract_command, increment_metric)
 from config import (MAX_NOTE_LENGTH, MAX_GLOBAL_NOTES, MAX_FWD_MESSAGES,
@@ -16,9 +17,6 @@ from config import (MAX_NOTE_LENGTH, MAX_GLOBAL_NOTES, MAX_FWD_MESSAGES,
 logger = logging.getLogger(__name__)
 
 
-# ==========================================
-# ОТПРАВКА СООБЩЕНИЯ (синхронная!)
-# ==========================================
 def send_message(vk, peer_id: int, text: str):
     try:
         vk.messages.send(peer_id=peer_id, message=text, random_id=0)
@@ -28,11 +26,7 @@ def send_message(vk, peer_id: int, text: str):
         increment_metric("send_errors")
 
 
-# ==========================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ==========================================
 def resolve_user_id(vk, raw: str):
-    """Определение ID пользователя: число, @ник, ник, ссылка, [id123|Имя]"""
     raw = (raw or "").strip()
     if not raw:
         return None, "❌ Не указан пользователь"
@@ -73,7 +67,6 @@ def resolve_user_id(vk, raw: str):
 
 
 def get_display_name(vk, user_id: int) -> str:
-    """Красивое имя пользователя"""
     try:
         info = vk.users.get(user_ids=user_id, fields=['screen_name'])[0]
         screen = info.get('screen_name')
@@ -96,9 +89,6 @@ def format_duration(seconds: int) -> str:
     return f"{seconds} сек."
 
 
-# ==========================================
-# ОБРАБОТКА СООБЩЕНИЙ
-# ==========================================
 async def handle_message(event, vk):
     msg = event.object.get('message', {})
     text = (msg.get('text') or '').strip()
@@ -235,14 +225,13 @@ async def handle_message(event, vk):
     arg2 = parts[2].strip() if len(parts) > 2 else ""
     full_args = clean_text[len(parts[0]):].strip()
 
-    # Роль пользователя
     user_role = await db.get_user_role(from_id)
     if from_id == BOT_OWNER_ID and user_role == "Private":
         await db.set_user_role(from_id, "GuildMaster")
         user_role = "GuildMaster"
     user_level = ROLE_HIERARCHY.get(user_role, 1)
 
-    # Определение команд
+    # Команды гильдии
     is_add_cmd = cmd in ["/add", "/добавить", "/добав", "/заметка"]
     is_list_cmd = cmd in ["/list", "/заметки", "/список", "/летопись"]
     is_del_cmd = cmd in ["/del", "/удалить", "/удал"]
@@ -260,10 +249,19 @@ async def handle_message(event, vk):
     is_set_st_cmd = cmd in ["/сетст", "/сетстамина", "/setst"]
     is_set_def_cmd = cmd in ["/сетдеф", "/сетзащита", "/setdef"]
 
+    # === КОМАНДЫ ГАРАНТА ===
+    is_sell_cmd = cmd in ["/продажа", "/sell", "/продать"]
+    is_lots_cmd = cmd in ["/лоты", "/lots", "/товары"]
+    is_buy_cmd = cmd in ["/купить", "/buy"]
+    is_inspect_cmd = cmd in ["/осмотр", "/inspect", "/профиль"]
+    is_accept_cmd = cmd in ["/принять", "/accept"]
+    is_transfer_cmd = cmd in ["/передать", "/transfer"]
+    is_pay_cmd = cmd in ["/оплатить", "/pay"]
+
     is_help_cmd = cmd in ["/help", "/помощь", "/справка"]
     is_start_cmd = cmd in ["/start", "/старт", "/начать"]
 
-    # ---------- ДОБАВИТЬ ЗАМЕТКУ ----------
+    # ========== ГИЛЬДИЯ ==========
     if is_add_cmd:
         if user_level < ROLE_HIERARCHY["Captain"]:
             send_message(vk, peer_id, "❌ Только Капитаны и выше могут оставлять записи в летописи гильдии.")
@@ -285,7 +283,6 @@ async def handle_message(event, vk):
             send_message(vk, peer_id, f"✅ Запись #{res['id']} внесена в летопись гильдии!")
             increment_metric("notes_added")
 
-    # ---------- СПИСОК ЗАМЕТОК ----------
     elif is_list_cmd:
         notes = await db.get_all_notes()
         if not notes:
@@ -305,7 +302,6 @@ async def handle_message(event, vk):
         send_message(vk, peer_id, t)
         increment_metric("notes_listed")
 
-    # ---------- УДАЛИТЬ ЗАМЕТКУ ----------
     elif is_del_cmd:
         if user_level < ROLE_HIERARCHY["Deputy"]:
             send_message(vk, peer_id, "❌ Только Зам главы и Глава гильдии могут удалять записи из летописи.")
@@ -344,7 +340,6 @@ async def handle_message(event, vk):
         else:
             send_message(vk, peer_id, "❌ У вас нет прав удалять записи этого ранга.")
 
-    # ---------- НАЗНАЧИТЬ РОЛЬ ----------
     elif is_role_cmd:
         if user_role != "GuildMaster":
             send_message(vk, peer_id, "❌ Только Глава гильдии может назначать ранги.")
@@ -377,7 +372,6 @@ async def handle_message(event, vk):
                      f"✅ Пользователю {get_display_name(vk, target_id)} присвоен ранг: {ru_role}")
         increment_metric("roles_assigned")
 
-    # ---------- СПИСОК РОЛЕЙ ----------
     elif is_roles_cmd:
         all_roles = await db.get_all_roles()
 
@@ -388,14 +382,12 @@ async def handle_message(event, vk):
                          "Используйте /роль [@ник] [ранг] для назначения (только Глава).")
             return
 
-        # Группируем по ролям
         roles_by_rank = {role: [] for role in ROLE_HIERARCHY.keys()}
         for entry in all_roles:
             role = entry['role']
             if role in roles_by_rank:
                 roles_by_rank[role].append(entry['user_id'])
 
-        # Получаем имена всех пользователей одним батч-запросом
         all_user_ids = [uid for uids in roles_by_rank.values() for uid in uids]
         user_names = {}
 
@@ -415,7 +407,6 @@ async def handle_message(event, vk):
             except Exception as e:
                 logger.error(f"Ошибка получения имён пользователей: {e}")
 
-        # Формируем ответ
         t = "📋 Роли гильдии:\n\n"
 
         for role_key in ["GuildMaster", "Deputy", "Cardinal", "Captain", "Lieutenant", "Private"]:
@@ -434,12 +425,10 @@ async def handle_message(event, vk):
         send_message(vk, peer_id, t)
         increment_metric("roles_listed")
 
-    # ---------- МОЯ РОЛЬ ----------
     elif is_myrole_cmd:
         ru_role = ROLE_NAMES_RU.get(user_role, user_role)
         send_message(vk, peer_id, f"🎖 Ваш ранг в гильдии: {ru_role}")
 
-    # ---------- МУТ ----------
     elif is_mute_cmd:
         if not is_chat:
             send_message(vk, peer_id, "❌ Мут работает только в беседах")
@@ -497,7 +486,6 @@ async def handle_message(event, vk):
                              f"❌ Ошибка мута: {e}\n\n"
                              "Убедитесь, что бот — администратор беседы с правом управления участниками")
 
-    # ---------- РАЗМУТ ----------
     elif is_unmute_cmd:
         if not is_chat:
             send_message(vk, peer_id, "❌ Размут работает только в беседах")
@@ -527,43 +515,219 @@ async def handle_message(event, vk):
             else:
                 send_message(vk, peer_id, f"❌ Ошибка размута: {e}")
 
-    # ---------- СЕТЫ: ФИЗИЧЕСКИЙ ----------
+    # ========== СЕТЫ ==========
     elif is_set_phys_cmd:
-        result = format_category("phys")
-        send_message(vk, peer_id, f"🔥 Сеты для физического урона:\n\n{result}")
+        send_message(vk, peer_id, f"🔥 Сеты для физического урона:\n\n{format_category('phys')}")
         increment_metric("sets_viewed")
 
-    # ---------- СЕТЫ: МАНА ----------
     elif is_set_mp_cmd:
-        result = format_category("mp")
-        send_message(vk, peer_id, f"💙 Сеты для маны:\n\n{result}")
+        send_message(vk, peer_id, f"💙 Сеты для маны:\n\n{format_category('mp')}")
         increment_metric("sets_viewed")
 
-    # ---------- СЕТЫ: ЗДОРОВЬЕ ----------
     elif is_set_hp_cmd:
-        result = format_category("hp")
-        send_message(vk, peer_id, f"❤️ Сеты для здоровья:\n\n{result}")
+        send_message(vk, peer_id, f"❤️ Сеты для здоровья:\n\n{format_category('hp')}")
         increment_metric("sets_viewed")
 
-    # ---------- СЕТЫ: МАГИЧЕСКИЙ ----------
     elif is_set_magic_cmd:
-        result = format_category("magic")
-        send_message(vk, peer_id, f"🔮 Сеты для магического урона:\n\n{result}")
+        send_message(vk, peer_id, f"🔮 Сеты для магического урона:\n\n{format_category('magic')}")
         increment_metric("sets_viewed")
 
-    # ---------- СЕТЫ: СТАМИНА ----------
     elif is_set_st_cmd:
-        result = format_category("stamina")
-        send_message(vk, peer_id, f"🤍 Сеты для стамины:\n\n{result}")
+        send_message(vk, peer_id, f"🤍 Сеты для стамины:\n\n{format_category('stamina')}")
         increment_metric("sets_viewed")
 
-    # ---------- СЕТЫ: ЗАЩИТА ----------
     elif is_set_def_cmd:
-        result = format_category("def")
-        send_message(vk, peer_id, f"🛡️ Сеты для защиты:\n\n{result}")
+        send_message(vk, peer_id, f"🛡️ Сеты для защиты:\n\n{format_category('def')}")
         increment_metric("sets_viewed")
 
-    # ---------- СПРАВКА ----------
+    # ========== ГАРАНТОР ==========
+    elif is_sell_cmd:
+        if not full_args:
+            send_message(vk, peer_id,
+                         "❌ Укажите товары для продажи. Пример:\n\n"
+                         "/продажа\n"
+                         "1. 🥼 💠 Мантия Тайн +15 [💙1508 🤍51]-700к\n"
+                         "2. ⚙️ Мозговой чип-80к 🔮")
+            return
+
+        items = parse_items_from_text(full_args)
+        if not items:
+            send_message(vk, peer_id, "❌ Не удалось распознать товары. Проверьте формат (Название - Цена).")
+            return
+
+        created_ids = []
+        for item in items:
+            lot_id = await db.create_lot(
+                from_id, item['item_name'], item['item_level'],
+                item['item_stats'], item['price']
+            )
+            created_ids.append(lot_id)
+
+        resp = f"✅ Создано {len(created_ids)} лот(ов):\n\n"
+        for lot_id in created_ids:
+            lot = await db.get_lot_by_id(lot_id)
+            resp += f"🆔 {lot['id']} | {format_lot_display(lot)}\n"
+        resp += "\n💡 /лоты — посмотреть свои товары\n💡 Другие игроки: /купить [ID]"
+        send_message(vk, peer_id, resp)
+        increment_metric("lots_created")
+
+    elif is_lots_cmd:
+        lots = await db.get_active_lots(from_id)
+        if not lots:
+            send_message(vk, peer_id, "📭 У вас нет активных лотов. Создайте через /продажа")
+            return
+        msg = "📦 Ваши активные лоты:\n\n"
+        for lot in lots:
+            msg += f"🆔 {lot['id']} | {format_lot_display(lot)}\n"
+        msg += "\n💡 Для покупки другой игрок должен написать: /купить [ID_лота]"
+        send_message(vk, peer_id, msg)
+        increment_metric("lots_viewed")
+
+    elif is_buy_cmd:
+        if not args:
+            send_message(vk, peer_id, "❌ Укажите ID лота. Пример: /купить 5")
+            return
+        try:
+            lot_id = int(args)
+        except ValueError:
+            send_message(vk, peer_id, "❌ ID лота должен быть числом.")
+            return
+
+        lot = await db.get_lot_by_id(lot_id)
+        if not lot or lot['status'] != 'active':
+            send_message(vk, peer_id, "❌ Лот не найден или уже продан.")
+            return
+        if lot['seller_id'] == from_id:
+            send_message(vk, peer_id, "❌ Нельзя купить свой собственный лот.")
+            return
+
+        deal_id = await db.create_deal(lot['seller_id'], from_id)
+        await db.link_lot_to_deal(lot_id, deal_id)
+
+        price_str = f"{lot['price'] // 1000}к 🔮" if lot['price'] >= 1000 else f"{lot['price']} 🔮"
+
+        msg = (f"🤝 Сделка #{deal_id} создана!\n\n"
+               f"📦 Товар: {lot['item_name']} {lot['item_level']} {lot['item_stats']}\n"
+               f"💰 Цена: {price_str}\n"
+               f"👤 Продавец: ID {lot['seller_id']}\n"
+               f"👤 Покупатель: ID {from_id}\n\n"
+               f"Команды:\n"
+               f"• /осмотр [ID] — проверить рейтинг\n"
+               f"• /принять {deal_id} — согласиться (для обеих сторон)\n"
+               f"• /отмена — отменить сделку")
+        send_message(vk, peer_id, msg)
+        increment_metric("deals_created")
+
+    elif is_inspect_cmd:
+        if not args:
+            send_message(vk, peer_id, "❌ Укажите ID пользователя. Пример: /осмотр 123456789")
+            return
+        try:
+            target_id = int(args)
+        except ValueError:
+            send_message(vk, peer_id, "❌ ID должен быть числом.")
+            return
+
+        rating_msg = await get_user_rating_display(vk, target_id)
+        send_message(vk, peer_id, rating_msg)
+        increment_metric("ratings_viewed")
+
+    elif is_accept_cmd:
+        if not args:
+            send_message(vk, peer_id, "❌ Укажите ID сделки. Пример: /принять 15")
+            return
+        try:
+            deal_id = int(args)
+        except ValueError:
+            send_message(vk, peer_id, "❌ ID сделки должен быть числом.")
+            return
+
+        deal = await db.get_deal_by_id(deal_id)
+        if not deal:
+            send_message(vk, peer_id, "❌ Сделка не найдена.")
+            return
+        if from_id not in [deal['seller_id'], deal['buyer_id']]:
+            send_message(vk, peer_id, "❌ Вы не участвуете в этой сделке.")
+            return
+
+        if deal['status'] == 'pending':
+            await db.update_deal_status(deal_id, 'accepted')
+            send_message(vk, peer_id,
+                         f"✅ Вы подтвердили сделку #{deal_id}. Ожидается подтверждение второй стороны.\n\n"
+                         f"После принятия обоими:\n"
+                         f"• Продавец: /передать {deal_id}\n"
+                         f"• Покупатель: /оплатить {deal_id}")
+        elif deal['status'] == 'accepted':
+            send_message(vk, peer_id,
+                         f"⏳ Сделка #{deal_id} уже ожидает действий:\n"
+                         f"• Продавец: /передать {deal_id}\n"
+                         f"• Покупатель: /оплатить {deal_id}")
+        else:
+            send_message(vk, peer_id, f"❌ Сделка #{deal_id} уже завершена или отменена.")
+
+    elif is_transfer_cmd:
+        if not args:
+            send_message(vk, peer_id, "❌ Укажите ID сделки.")
+            return
+        try:
+            deal_id = int(args)
+        except ValueError:
+            send_message(vk, peer_id, "❌ ID должен быть числом.")
+            return
+
+        deal = await db.get_deal_by_id(deal_id)
+        if not deal or from_id != deal['seller_id']:
+            send_message(vk, peer_id, "❌ Только продавец может использовать эту команду для этой сделки.")
+            return
+
+        if deal['status'] == 'accepted':
+            await db.update_deal_status(deal_id, 'transferred')
+            send_message(vk, peer_id,
+                         f"✅ Вы подтвердили передачу товара в сделке #{deal_id}.\n"
+                         f"Ожидается оплата от покупателя: /оплатить {deal_id}")
+        elif deal['status'] == 'paid':
+            await db.update_deal_status(deal_id, 'completed')
+            await db.update_user_rating(deal['seller_id'], True)
+            await db.update_user_rating(deal['buyer_id'], True)
+            send_message(vk, peer_id,
+                         f"🎉 Сделка #{deal_id} успешно завершена!\n"
+                         f"Товар передан, оплата получена.\n"
+                         f"Ваш рейтинг обновлён.")
+        else:
+            send_message(vk, peer_id, f"❌ Неверный статус сделки #{deal_id} для этой команды.")
+
+    elif is_pay_cmd:
+        if not args:
+            send_message(vk, peer_id, "❌ Укажите ID сделки.")
+            return
+        try:
+            deal_id = int(args)
+        except ValueError:
+            send_message(vk, peer_id, "❌ ID должен быть числом.")
+            return
+
+        deal = await db.get_deal_by_id(deal_id)
+        if not deal or from_id != deal['buyer_id']:
+            send_message(vk, peer_id, "❌ Только покупатель может использовать эту команду для этой сделки.")
+            return
+
+        if deal['status'] == 'accepted':
+            await db.update_deal_status(deal_id, 'paid')
+            send_message(vk, peer_id,
+                         f"✅ Вы подтвердили оплату в сделке #{deal_id}.\n"
+                         f"Ожидается подтверждение передачи товара от продавца: /передать {deal_id}")
+        elif deal['status'] == 'transferred':
+            await db.update_deal_status(deal_id, 'completed')
+            await db.update_user_rating(deal['seller_id'], True)
+            await db.update_user_rating(deal['buyer_id'], True)
+            send_message(vk, peer_id,
+                         f"🎉 Сделка #{deal_id} успешно завершена!\n"
+                         f"Товар передан, оплата получена.\n"
+                         f"Ваш рейтинг обновлён.")
+        else:
+            send_message(vk, peer_id, f"❌ Неверный статус сделки #{deal_id} для этой команды.")
+
+    # ========== СПРАВКА ==========
     elif is_help_cmd:
         h = ("📖 Команды гильдии:\n"
              "/добавить [текст] — внести запись (Капитан+)\n"
@@ -581,13 +745,16 @@ async def handle_message(event, vk):
              "• Перешлите статы — покажу классы\n"
              "• '@бот статус' — динамика профиля\n\n"
              "⚔️ Сеты брони:\n"
-             "• /сетФиз — Сет Гнева + Выносливости\n"
-             "• /сетМп — Сет Шторма + Тайн + Баланса\n"
-             "• /сетХп — Сет Страданий + Вечности + Баланса\n"
-             "• /сетМаг — Сет Звёзд + Тайн\n"
-             "• /сетСт — Сет Выносливости + Баланса\n"
-             "• /сетДеф — Сет Патриота + Выносливости\n\n"
-             "💡 Английские аналоги: /add, /list, /del, /role, /roles, /mute, /unmute, /help")
+             "• /сетФиз, /сетМп, /сетХп, /сетМаг, /сетСт, /сетДеф\n\n"
+             "🤝 Гарант сделок:\n"
+             "• /продажа [список] — выставить товары\n"
+             "• /лоты — мои товары\n"
+             "• /купить [ID] — купить лот\n"
+             "• /осмотр [ID] — рейтинг пользователя\n"
+             "• /принять [ID] — согласиться на сделку\n"
+             "• /передать [ID] — продавец подтверждает передачу\n"
+             "• /оплатить [ID] — покупатель подтверждает оплату\n\n"
+             "💡 Все цены в ядрах 🔮")
         send_message(vk, peer_id, h)
         increment_metric("help_shown")
 

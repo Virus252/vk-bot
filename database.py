@@ -21,6 +21,7 @@ class Database:
 
     async def init(self):
         async with aiosqlite.connect(self.db_path) as db:
+            # Таблица общих заметок гильдии
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS notes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +32,7 @@ class Database:
                 )
             """)
 
+            # Таблица ролей пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS user_roles (
                     user_id INTEGER PRIMARY KEY,
@@ -38,6 +40,7 @@ class Database:
                 )
             """)
 
+            # Таблица профилей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS profiles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,6 +50,7 @@ class Database:
                 )
             """)
 
+            # Таблица ожидания статуса
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS waiting_status (
                     peer_id INTEGER PRIMARY KEY,
@@ -55,12 +59,61 @@ class Database:
                 )
             """)
 
+            # === ТАБЛИЦЫ ГАРАНТА ===
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS deals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    seller_id INTEGER NOT NULL,
+                    buyer_id INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS lots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    deal_id INTEGER,
+                    seller_id INTEGER NOT NULL,
+                    item_name TEXT NOT NULL,
+                    item_level TEXT,
+                    item_stats TEXT,
+                    price INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_ratings (
+                    user_id INTEGER PRIMARY KEY,
+                    total_deals INTEGER DEFAULT 0,
+                    successful_deals INTEGER DEFAULT 0,
+                    failed_deals INTEGER DEFAULT 0,
+                    rating REAL DEFAULT 5.0
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    deal_id INTEGER NOT NULL,
+                    reviewer_id INTEGER NOT NULL,
+                    reviewee_id INTEGER NOT NULL,
+                    rating INTEGER NOT NULL,
+                    comment TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             await db.commit()
+
+            # Миграция старой таблицы заметок (если была личная)
             await self._migrate_notes(db)
 
             await db.execute("CREATE INDEX IF NOT EXISTS idx_notes_author ON notes(author_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_profiles_user ON profiles(user_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_profiles_timestamp ON profiles(timestamp)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_lots_seller ON lots(seller_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_deals_seller ON deals(seller_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_deals_buyer ON deals(buyer_id)")
             await db.commit()
             logger.info(f"✅ База данных инициализирована: {self.db_path}")
 
@@ -93,6 +146,9 @@ class Database:
             logger.error(f"Ошибка миграции заметок: {e}")
             await db.rollback()
 
+    # ==========================================
+    # БЭКАПЫ
+    # ==========================================
     async def start_backup_scheduler(self):
         self._backup_task = asyncio.create_task(self._backup_loop())
         logger.info(f"💾 Планировщик бэкапов запущен (интервал: {self.backup_interval}с)")
@@ -125,7 +181,9 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка создания бэкапа: {e}")
 
-    # === РОЛИ ===
+    # ==========================================
+    # РОЛИ
+    # ==========================================
     async def get_user_role(self, user_id: int) -> str:
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
@@ -150,7 +208,9 @@ class Database:
             rows = await cursor.fetchall()
             return [{"user_id": r[0], "role": r[1]} for r in rows]
 
-    # === ОБЩИЕ ЗАМЕТКИ ===
+    # ==========================================
+    # ОБЩИЕ ЗАМЕТКИ
+    # ==========================================
     async def add_note_global(self, author_id: int, text: str, role: str) -> Union[Dict, str, None]:
         if len(text) > MAX_NOTE_LENGTH:
             return None
@@ -197,7 +257,9 @@ class Database:
             await db.commit()
             return cursor.rowcount > 0
 
-    # === ПРОФИЛИ ===
+    # ==========================================
+    # ПРОФИЛИ
+    # ==========================================
     async def save_profile_snapshot(self, user_id: int, data: Dict, timestamp: str):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -224,7 +286,9 @@ class Database:
             rows = await cursor.fetchall()
             return [{"data": json.loads(r[0]), "timestamp": r[1]} for r in rows]
 
-    # === ОЖИДАНИЕ СТАТУСА ===
+    # ==========================================
+    # ОЖИДАНИЕ СТАТУСА
+    # ==========================================
     async def add_waiting_status(self, peer_id: int, user_id: int):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -250,6 +314,130 @@ class Database:
             await db.execute(
                 "DELETE FROM waiting_status WHERE ? - timestamp > ?",
                 (time.time(), STATUS_WAIT_TIMEOUT)
+            )
+            await db.commit()
+
+    # ==========================================
+    # ГАРАНТ: ЛОТЫ
+    # ==========================================
+    async def create_lot(self, seller_id: int, item_name: str, item_level: str,
+                         item_stats: str, price: int) -> int:
+        """Создание лота на продажу"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """INSERT INTO lots (seller_id, item_name, item_level, item_stats, price, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, 'active', datetime('now', 'localtime'))""",
+                (seller_id, item_name, item_level, item_stats, price)
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_active_lots(self, seller_id: int = None) -> List[Dict]:
+        """Получение активных лотов"""
+        async with aiosqlite.connect(self.db_path) as db:
+            if seller_id:
+                cursor = await db.execute(
+                    "SELECT * FROM lots WHERE seller_id = ? AND status = 'active' ORDER BY id DESC",
+                    (seller_id,)
+                )
+            else:
+                cursor = await db.execute(
+                    "SELECT * FROM lots WHERE status = 'active' ORDER BY id DESC LIMIT 30"
+                )
+            rows = await cursor.fetchall()
+            return [
+                {"id": r[0], "seller_id": r[2], "item_name": r[3],
+                 "item_level": r[4], "item_stats": r[5], "price": r[6]}
+                for r in rows
+            ]
+
+    async def get_lot_by_id(self, lot_id: int) -> Optional[Dict]:
+        """Получение лота по ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT * FROM lots WHERE id = ?", (lot_id,))
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "id": row[0], "deal_id": row[1], "seller_id": row[2],
+                    "item_name": row[3], "item_level": row[4], "item_stats": row[5],
+                    "price": row[6], "status": row[7]
+                }
+            return None
+
+    async def link_lot_to_deal(self, lot_id: int, deal_id: int):
+        """Привязка лота к сделке"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE lots SET deal_id = ?, status = 'in_deal' WHERE id = ?",
+                (deal_id, lot_id)
+            )
+            await db.commit()
+
+    # ==========================================
+    # ГАРАНТ: СДЕЛКИ
+    # ==========================================
+    async def create_deal(self, seller_id: int, buyer_id: int) -> int:
+        """Создание сделки"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """INSERT INTO deals (seller_id, buyer_id, status, created_at)
+                   VALUES (?, ?, 'pending', datetime('now', 'localtime'))""",
+                (seller_id, buyer_id)
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_deal_by_id(self, deal_id: int) -> Optional[Dict]:
+        """Получение сделки по ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT * FROM deals WHERE id = ?", (deal_id,))
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "id": row[0], "seller_id": row[1], "buyer_id": row[2], "status": row[3]
+                }
+            return None
+
+    async def update_deal_status(self, deal_id: int, status: str):
+        """Обновление статуса сделки"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE deals SET status = ? WHERE id = ?", (status, deal_id))
+            await db.commit()
+
+    # ==========================================
+    # ГАРАНТ: РЕЙТИНГИ
+    # ==========================================
+    async def get_user_rating(self, user_id: int) -> Dict:
+        """Получение рейтинга пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT * FROM user_ratings WHERE user_id = ?", (user_id,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "total_deals": row[1], "successful_deals": row[2],
+                    "failed_deals": row[3], "rating": row[4]
+                }
+            return {"total_deals": 0, "successful_deals": 0, "failed_deals": 0, "rating": 5.0}
+
+    async def update_user_rating(self, user_id: int, success: bool):
+        """Обновление рейтинга после сделки"""
+        async with aiosqlite.connect(self.db_path) as db:
+            current = await self.get_user_rating(user_id)
+            new_total = current['total_deals'] + 1
+            new_success = current['successful_deals'] + (1 if success else 0)
+            new_failed = current['failed_deals'] + (0 if success else 1)
+            
+            # +0.1 за успех, -0.3 за провал, ограничители 1.0 - 5.0
+            new_rating = current['rating'] + (0.1 if success else -0.3)
+            new_rating = max(1.0, min(5.0, new_rating))
+            
+            await db.execute(
+                """INSERT OR REPLACE INTO user_ratings
+                   (user_id, total_deals, successful_deals, failed_deals, rating)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, new_total, new_success, new_failed, new_rating)
             )
             await db.commit()
 

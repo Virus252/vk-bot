@@ -176,10 +176,64 @@ def format_diff(old_p: Dict, new_p: Dict, ts_old: str, ts_new: str) -> str:
     ]:
         check_change(key, label)
 
-    check_change("crit", "💥 Крит")
-    check_change("chance", "🎲 Шанс")
-    check_change("phys_dmg", "🗡 Физ.урон")
-    check_change("mag_dmg", "✨ Маг. урон")
+    def check_damage_change(min_key, max_key, single_key, label):
+        old_min = old_p.get(min_key, 0) or 0
+        new_min = new_p.get(min_key, 0) or 0
+        old_max = old_p.get(max_key, 0) or 0
+        new_max = new_p.get(max_key, 0) or 0
+
+        # Если есть диапазон min/max
+        if (old_min or old_max or new_min or new_max) and (old_min != old_max or new_min != new_max):
+            d_min = new_min - old_min
+            d_max = new_max - old_max
+            if abs(d_min) <= 0.001 and abs(d_max) <= 0.001:
+                return
+            if d_min == d_max:
+                f_val = format_number_with_suffix(d_min)
+                if f_val:
+                    ch.append(f"{label}: {f_val}")
+            else:
+                f_min = format_number_with_suffix(d_min) or "+0"
+                f_max = format_number_with_suffix(d_max) or "+0"
+                ch.append(f"{label}: {f_min}..{f_max}")
+        else:
+            # Одиночное значение (phys_dmg / mag_dmg или равные min==max)
+            val_old = old_p.get(single_key) or old_max or old_min or 0
+            val_new = new_p.get(single_key) or new_max or new_min or 0
+            d = val_new - val_old
+            if abs(d) > 0.001:
+                f_val = format_number_with_suffix(d)
+                if f_val:
+                    ch.append(f"{label}: {f_val}")
+
+    check_damage_change("min_dmg", "max_dmg", "phys_dmg", "🗡 Физ.урон")
+    check_damage_change("min_spec", "max_spec", "mag_dmg", "✨ Маг. урон")
+
+    def check_percent_change(keys, label):
+        val_old = 0.0
+        val_new = 0.0
+        if isinstance(keys, str):
+            keys = [keys]
+        for k in keys:
+            if k in old_p and old_p[k] is not None:
+                val_old = float(old_p[k])
+                break
+        for k in keys:
+            if k in new_p and new_p[k] is not None:
+                val_new = float(new_p[k])
+                break
+        d = val_new - val_old
+        if abs(d) <= 0.001:
+            return
+        sign = '+' if d > 0 else ''
+        if abs(d - round(d)) < 0.01:
+            val_str = f"{sign}{int(round(d))}%"
+        else:
+            val_str = f"{sign}{d:.1f}%"
+        ch.append(f"{label}: {val_str}")
+
+    check_percent_change(["crit_dmg", "crit"], "💥 Крит. урон")
+    check_percent_change(["crit_chance", "chance"], "🎲 Крит. шанс")
 
 
     if not ch:

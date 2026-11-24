@@ -40,8 +40,8 @@ PROFILE_PARSERS = [
     ProfileFieldParser("luck", re.compile(r'🍀\s*Удача:\s*(\d+)')),
     ProfileFieldParser("speed", re.compile(r'(?:⚡|🏃)\s*Скорость:\s*(\d+)')),
 
-    ProfileFieldParser("crit", re.compile(r'💥\s*Крит:\s*([\d.]+)%'), type_cast=float),
-    ProfileFieldParser("chance", re.compile(r'🎲\s*Шанс:\s*([\d.]+)%'), type_cast=float),
+   ProfileFieldParser("crit", re.compile(r'(?:💥(?:\s(?:[Кк]рит(?:\.?\sурон)?|[Уу]рон))?|[Кк]рит\.?\sурон)\s:?\s([\d.]+)\s%?'), type_cast=float),
+    ProfileFieldParser("chance", re.compile(r'(?:🎲(?:\s(?:[Кк]рит\.?\sшанс|[Шш]анс(?:\sкрита)?|[Шш]анс))?|[Кк]рит\.?\sшанс|[Шш]анс\sкрита)\s:?\s([\d.]+)\s%?'), type_cast=float),
 
     ProfileFieldParser("cores", re.compile(r'🔮\s*Ядер:\s*(\d+)')),
     ProfileFieldParser("rnd", re.compile(r'🪙\s*RND:\s*(\d+)')),
@@ -51,7 +51,6 @@ PROFILE_PARSERS = [
 
     ProfileFieldParser("race", re.compile(r'🔹\s*([А-ЯЁа-яёA-Za-z]+)\s*\|'), type_cast=str),
 
-    # Защита (🛡 физ / 🌟 маг)
     ProfileFieldParser("phys_def", re.compile(r'Физ\.?\s*защита:\s*(\d+)')),
     ProfileFieldParser("magic_def", re.compile(r'Маг\.?\s*защита:\s*(\d+)')),
 
@@ -69,8 +68,9 @@ def parse_profile_text(text: str) -> Dict:
         "level": 0, "exp_current": 0.0, "exp_max": 0.0,
         "hp": 0, "mana": 0, "stamina": 0,
         "strength": 0, "intelligence": 0, "agility": 0,
-        "luck": 0, "speed": 0, "crit": 0.0, "chance": 0.0,
-        "min_dmg": 0, "max_dmg": 0, "min_spec": 0, "max_spec": 0,
+        "luck": 0, "speed": 0, "crit": 0.0, "crit_dmg": 0.0, "chance": 0.0, "crit_chance": 0.0,
+        "min_dmg": 0, "max_dmg": 0, "phys_dmg": 0,
+        "min_spec": 0, "max_spec": 0, "mag_dmg": 0,
         "cores": 0, "rnd": 0, "research_points": 0, "research_max": 0,
         "upgrades": 0,
         "race": "", "phys_def": 0, "magic_def": 0,
@@ -78,15 +78,44 @@ def parse_profile_text(text: str) -> Dict:
         "oi_spent": 0, "fisher_level": 0, "fish_caught": 0
     }
 
-    dmg_match = re.search(r'(?:Урон|Атака|🗡):\s*(\d+)-(\d+)', text)
-    if dmg_match:
-        profile["min_dmg"] = int(dmg_match.group(1))
-        profile["max_dmg"] = int(dmg_match.group(2))
+    m_phys = re.search(r'🗡(?:\s(?:[Фф]из\.?\sурон|[Уу]рон|[Аа]така))?\s:?\s(\d+)(?:\s[-–—]\s(\d+))?', text)
+    if not m_phys:
+        m_phys = re.search(r'(?:[Фф]из\.?\sурон|[Аа]така)\s:?\s(\d+)(?:\s[-–—]\s*(\d+))?', text)
+    if not m_phys:
+        for line in text.splitlines():
+            if 'маг' not in line.lower() and 'спец' not in line.lower():
+                m = re.search(r'[Уу]рон\s:?\s(\d+)(?:\s[-–—]\s(\d+))?', line)
+                if m:
+                    m_phys = m
+                    break
 
-    spec_match = re.search(r'(?:Спец\.|Специальный|✨):\s*(\d+)-(\d+)', text)
-    if spec_match:
-        profile["min_spec"] = int(spec_match.group(1))
-        profile["max_spec"] = int(spec_match.group(2))
+    if m_phys:
+        v1 = int(m_phys.group(1))
+        v2 = int(m_phys.group(2)) if m_phys.group(2) else v1
+        profile["min_dmg"] = min(v1, v2)
+        profile["max_dmg"] = max(v1, v2)
+        profile["phys_dmg"] = profile["max_dmg"]
+        
+    m_mag = re.search(r'✨(?:\s(?:[Мм]аг\.?\sурон|[Сс]пец\.?\sурон|[Сс]пец\.?|[Сс]пециальный))?\s:?\s(\d+)(?:\s[-–—]\s*(\d+))?', text)
+    if not m_mag:
+        m_mag = re.search(r'(?:[Мм]аг\.?\sурон|[Сс]пец\.?\sурон|[Сс]пец\.?|[Сс]пециальный)\s:?\s(\d+)(?:\s[-–—]\s(\d+))?', text)
+
+    if m_mag:
+        v1 = int(m_mag.group(1))
+        v2 = int(m_mag.group(2)) if m_mag.group(2) else v1
+        profile["min_spec"] = min(v1, v2)
+        profile["max_spec"] = max(v1, v2)
+        profile["mag_dmg"] = profile["max_spec"]
+
+    for parser in PROFILE_PARSERS:
+        parser.parse(text, profile)
+
+    if profile.get("crit"):
+        profile["crit_dmg"] = profile["crit"]
+    if profile.get("chance"):
+        profile["crit_chance"] = profile["chance"]
+
+    return profile
 
     for parser in PROFILE_PARSERS:
         parser.parse(text, profile)
