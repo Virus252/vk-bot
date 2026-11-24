@@ -17,6 +17,9 @@ from config import (MAX_NOTE_LENGTH, MAX_GLOBAL_NOTES, MAX_FWD_MESSAGES,
 logger = logging.getLogger(__name__)
 
 
+# ==========================================
+# ОТПРАВКА СООБЩЕНИЯ (синхронная!)
+# ==========================================
 def send_message(vk, peer_id: int, text: str):
     try:
         vk.messages.send(peer_id=peer_id, message=text, random_id=0)
@@ -26,7 +29,11 @@ def send_message(vk, peer_id: int, text: str):
         increment_metric("send_errors")
 
 
+# ==========================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ==========================================
 def resolve_user_id(vk, raw: str):
+    """Определение ID пользователя: число, @ник, ник, ссылка, [id123|Имя]"""
     raw = (raw or "").strip()
     if not raw:
         return None, "❌ Не указан пользователь"
@@ -67,6 +74,7 @@ def resolve_user_id(vk, raw: str):
 
 
 def get_display_name(vk, user_id: int) -> str:
+    """Красивое имя пользователя"""
     try:
         info = vk.users.get(user_ids=user_id, fields=['screen_name'])[0]
         screen = info.get('screen_name')
@@ -89,6 +97,9 @@ def format_duration(seconds: int) -> str:
     return f"{seconds} сек."
 
 
+# ==========================================
+# ОБРАБОТКА СООБЩЕНИЙ
+# ==========================================
 async def handle_message(event, vk):
     msg = event.object.get('message', {})
     text = (msg.get('text') or '').strip()
@@ -225,13 +236,14 @@ async def handle_message(event, vk):
     arg2 = parts[2].strip() if len(parts) > 2 else ""
     full_args = clean_text[len(parts[0]):].strip()
 
+    # Роль пользователя
     user_role = await db.get_user_role(from_id)
     if from_id == BOT_OWNER_ID and user_role == "Private":
         await db.set_user_role(from_id, "GuildMaster")
         user_role = "GuildMaster"
     user_level = ROLE_HIERARCHY.get(user_role, 1)
 
-    # Команды гильдии
+    # Определение команд
     is_add_cmd = cmd in ["/add", "/добавить", "/добав", "/заметка"]
     is_list_cmd = cmd in ["/list", "/заметки", "/список", "/летопись"]
     is_del_cmd = cmd in ["/del", "/удалить", "/удал"]
@@ -438,18 +450,32 @@ async def handle_message(event, vk):
             send_message(vk, peer_id, "❌ Только Глава, Зам главы и Кардинал могут мутить пользователей")
             return
 
-        if not args:
+        target_id = None
+        reason = ""
+        
+        # Сначала проверяем, есть ли ответ на сообщение
+        reply_msg = msg.get('reply_message')
+        if reply_msg:
+            target_id = reply_msg.get('from_id')
+            reason = full_args.strip()  # Весь текст после команды = причина
+        elif args:
+            # Старый способ: ID/ник + причина
+            target_id, err = resolve_user_id(vk, args)
+            if err:
+                send_message(vk, peer_id, err)
+                return
+            reason = arg2.strip()
+        else:
             send_message(vk, peer_id,
-                         "❌ Использование: /мут [@ник или id] [причина]\n"
+                         "❌ Укажите пользователя:\n"
+                         "• Ответьте на сообщение командой /мут [причина]\n"
+                         "• Или: /мут [@ник или id] [причина]\n"
                          f"⏳ Длительность по умолчанию: {format_duration(DEFAULT_MUTE_DURATION)}")
             return
 
-        target_id, err = resolve_user_id(vk, args)
-        if err:
-            send_message(vk, peer_id, err)
+        if not target_id:
+            send_message(vk, peer_id, "❌ Не удалось определить пользователя")
             return
-
-        reason = arg2.strip()
 
         if target_id == from_id:
             send_message(vk, peer_id, "❌ Нельзя мутить себя")
@@ -495,13 +521,26 @@ async def handle_message(event, vk):
             send_message(vk, peer_id, "❌ Только Глава, Зам главы и Кардинал могут снимать мут")
             return
 
-        if not args:
-            send_message(vk, peer_id, "❌ Использование: /размут [@ник или id]")
+        target_id = None
+        
+        # Сначала проверяем, есть ли ответ на сообщение
+        reply_msg = msg.get('reply_message')
+        if reply_msg:
+            target_id = reply_msg.get('from_id')
+        elif args:
+            target_id, err = resolve_user_id(vk, args)
+            if err:
+                send_message(vk, peer_id, err)
+                return
+        else:
+            send_message(vk, peer_id,
+                         "❌ Укажите пользователя:\n"
+                         "• Ответьте на сообщение командой /размут\n"
+                         "• Или: /размут [@ник или id]")
             return
 
-        target_id, err = resolve_user_id(vk, args)
-        if err:
-            send_message(vk, peer_id, err)
+        if not target_id:
+            send_message(vk, peer_id, "❌ Не удалось определить пользователя")
             return
 
         try:
@@ -619,18 +658,35 @@ async def handle_message(event, vk):
         increment_metric("deals_created")
 
     elif is_inspect_cmd:
-        if not args:
-            send_message(vk, peer_id, "❌ Укажите ID пользователя. Пример: /осмотр 123456789")
+        target_id = None
+        
+        # Сначала проверяем, есть ли ответ на сообщение
+        reply_msg = msg.get('reply_message')
+        if reply_msg:
+            target_id = reply_msg.get('from_id')
+        
+        # Если ответа нет — пробуем ID из аргументов
+        if not target_id:
+            if not args:
+                send_message(vk, peer_id, 
+                            "❌ Укажите пользователя:\n"
+                            "• Ответьте на сообщение командой /осмотр\n"
+                            "• Или: /осмотр 123456789\n"
+                            "• Или: /осмотр @wodyano1")
+                return
+            
+            target_id, err = resolve_user_id(vk, args)
+            if err:
+                send_message(vk, peer_id, err)
+                return
+        
+        if not target_id:
+            send_message(vk, peer_id, "❌ Не удалось определить пользователя")
             return
-        try:
-            target_id = int(args)
-        except ValueError:
-            send_message(vk, peer_id, "❌ ID должен быть числом.")
-            return
-
+        
         rating_msg = await get_user_rating_display(vk, target_id)
         send_message(vk, peer_id, rating_msg)
-        increment_metric("ratings_viewed")
+        increment_metric("users_inspected")
 
     elif is_accept_cmd:
         if not args:
@@ -736,8 +792,10 @@ async def handle_message(event, vk):
              "/роль [@ник или id] [ранг] — назначить ранг (Глава)\n"
              "/роли — посмотреть всех с ролями (Все)\n"
              "/мояроль — показать свой ранг\n"
-             "/мут [@ник или id] [причина] — заглушить (Глава/Зам/Кардинал)\n"
-             "/размут [@ник или id] — снять заглушение (Глава/Зам/Кардинал)\n\n"
+             "/мут — заглушить пользователя (ответьте на сообщение)\n"
+             "/мут [@ник или id] [причина] — заглушить вручную (Глава/Зам/Кардинал)\n"
+             "/размут — снять заглушение (ответьте на сообщение)\n"
+             "/размут [@ник или id] — снять заглушение вручную (Глава/Зам/Кардинал)\n\n"
              "🎖 Ранги: 👑 Глава → ⚔️ Зам → 📿 Кардинал → "
              "🛡️ Капитан → 🎖️ Лейтенант → 🪖 Рядовой\n\n"
              "🏰 Tower of Random:\n"
@@ -750,7 +808,7 @@ async def handle_message(event, vk):
              "• /продажа [список] — выставить товары\n"
              "• /лоты — мои товары\n"
              "• /купить [ID] — купить лот\n"
-             "• /осмотр [ID] — рейтинг пользователя\n"
+             "• /осмотр — рейтинг пользователя\n"
              "• /принять [ID] — согласиться на сделку\n"
              "• /передать [ID] — продавец подтверждает передачу\n"
              "• /оплатить [ID] — покупатель подтверждает оплату\n\n"
