@@ -223,7 +223,7 @@ async def handle_message(event, vk):
         return
 
     # ==========================================
-    # 4. Команды (работают и в чатах, и в ЛС)
+    # 4. Команды
     # ==========================================
     clean_text = (extract_command(text) if is_bot_mentioned(text) else text).strip()
 
@@ -236,14 +236,13 @@ async def handle_message(event, vk):
     arg2 = parts[2].strip() if len(parts) > 2 else ""
     full_args = clean_text[len(parts[0]):].strip()
 
-    # Роль пользователя
     user_role = await db.get_user_role(from_id)
     if from_id == BOT_OWNER_ID and user_role == "Private":
         await db.set_user_role(from_id, "GuildMaster")
         user_role = "GuildMaster"
     user_level = ROLE_HIERARCHY.get(user_role, 1)
 
-    # Определение команд
+    # Команды гильдии
     is_add_cmd = cmd in ["/add", "/добавить", "/добав", "/заметка"]
     is_list_cmd = cmd in ["/list", "/заметки", "/список", "/летопись"]
     is_del_cmd = cmd in ["/del", "/удалить", "/удал"]
@@ -261,9 +260,9 @@ async def handle_message(event, vk):
     is_set_st_cmd = cmd in ["/сетст", "/сетстамина", "/setst"]
     is_set_def_cmd = cmd in ["/сетдеф", "/сетзащита", "/setdef"]
 
-    # === КОМАНДЫ ГАРАНТА ===
+    # Команды гаранта
     is_sell_cmd = cmd in ["/продажа", "/sell", "/продать"]
-    is_lots_cmd = cmd in ["/лоты", "/lots", "/товары"]
+    is_lots_cmd = cmd in ["/лоты", "/lots", "/товары", "/лот"]
     is_buy_cmd = cmd in ["/купить", "/buy"]
     is_inspect_cmd = cmd in ["/осмотр", "/inspect", "/профиль"]
     is_accept_cmd = cmd in ["/принять", "/accept"]
@@ -452,14 +451,12 @@ async def handle_message(event, vk):
 
         target_id = None
         reason = ""
-        
-        # Сначала проверяем, есть ли ответ на сообщение
+
         reply_msg = msg.get('reply_message')
         if reply_msg:
             target_id = reply_msg.get('from_id')
-            reason = full_args.strip()  # Весь текст после команды = причина
+            reason = full_args.strip()
         elif args:
-            # Старый способ: ID/ник + причина
             target_id, err = resolve_user_id(vk, args)
             if err:
                 send_message(vk, peer_id, err)
@@ -522,8 +519,7 @@ async def handle_message(event, vk):
             return
 
         target_id = None
-        
-        # Сначала проверяем, есть ли ответ на сообщение
+
         reply_msg = msg.get('reply_message')
         if reply_msg:
             target_id = reply_msg.get('from_id')
@@ -611,16 +607,101 @@ async def handle_message(event, vk):
         increment_metric("lots_created")
 
     elif is_lots_cmd:
-        lots = await db.get_active_lots(from_id)
-        if not lots:
-            send_message(vk, peer_id, "📭 У вас нет активных лотов. Создайте через /продажа")
-            return
-        msg = "📦 Ваши активные лоты:\n\n"
-        for lot in lots:
-            msg += f"🆔 {lot['id']} | {format_lot_display(lot)}\n"
-        msg += "\n💡 Для покупки другой игрок должен написать: /купить [ID_лота]"
-        send_message(vk, peer_id, msg)
-        increment_metric("lots_viewed")
+        # Проверяем, хочет ли пользователь увидеть конкретный лот по ID
+        if args:
+            try:
+                lot_id = int(args)
+                lot = await db.get_lot_by_id(lot_id)
+
+                if not lot:
+                    send_message(vk, peer_id, f"❌ Лот #{lot_id} не найден")
+                    return
+
+                # Получаем имя продавца
+                try:
+                    seller_info = vk.users.get(user_ids=lot['seller_id'], fields=['screen_name'])[0]
+                    screen = seller_info.get('screen_name')
+                    seller_name = f"@{screen}" if screen else f"{seller_info['first_name']} {seller_info['last_name']}".strip()
+                except Exception:
+                    seller_name = f"ID: {lot['seller_id']}"
+
+                price_str = f"{lot['price'] // 1000}к 🔮" if lot['price'] >= 1000 else f"{lot['price']} 🔮"
+
+                msg = f"📦 Лот #{lot['id']}\n\n"
+                msg += f"🏷 Название: {lot['item_name']}\n"
+                if lot.get('item_level'):
+                    msg += f"📈 Уровень: {lot['item_level']}\n"
+                if lot.get('item_stats'):
+                    msg += f"📊 Характеристики: {lot['item_stats']}\n"
+                msg += f"💰 Цена: {price_str}\n"
+                msg += f"👤 Продавец: {seller_name}\n\n"
+                msg += "💡 /купить [ID] — купить этот лот"
+
+                send_message(vk, peer_id, msg)
+                increment_metric("lot_viewed")
+                return
+            except ValueError:
+                pass  # Если не число, продолжаем обработку
+
+        # Проверяем, хочет ли пользователь увидеть все лоты
+        show_all = args.lower() in ["все", "all", "чат", "рынок", "маркет", ""]
+
+        if show_all:
+            lots = await db.get_all_active_lots()
+            if not lots:
+                send_message(vk, peer_id, "📭 На рынке сейчас нет активных лотов.")
+                return
+
+            # Получаем имена всех продавцов одним батч-запросом
+            seller_ids = list(set(lot['seller_id'] for lot in lots))
+            seller_names = {}
+
+            if seller_ids:
+                try:
+                    batch_size = 500
+                    for i in range(0, len(seller_ids), batch_size):
+                        batch = seller_ids[i:i + batch_size]
+                        users_info = vk.users.get(user_ids=batch, fields=['screen_name'])
+                        for u in users_info:
+                            uid = u['id']
+                            screen = u.get('screen_name')
+                            if screen:
+                                seller_names[uid] = f"@{screen}"
+                            else:
+                                seller_names[uid] = f"{u['first_name']} {u['last_name']}".strip()
+                except Exception as e:
+                    logger.error(f"Ошибка получения имён продавцов: {e}")
+
+            msg = f"🛒 Все лоты на рынке ({len(lots)}):\n\n"
+            for lot in lots:
+                price_str = f"{lot['price'] // 1000}к 🔮" if lot['price'] >= 1000 else f"{lot['price']} 🔮"
+
+                # Краткое описание: только название и цена
+                lot_line = f"🆔 {lot['id']} | 📦 {lot['item_name']} - {price_str}"
+
+                seller_name = seller_names.get(lot['seller_id'], f"ID: {lot['seller_id']}")
+                lot_line += f"\n   👤 {seller_name}\n"
+
+                msg += lot_line
+
+            msg += "\n💡 /лот [ID] — подробная информация\n💡 /купить [ID] — купить лот"
+            send_message(vk, peer_id, msg)
+            increment_metric("market_viewed")
+        else:
+            # Показываем только свои лоты
+            lots = await db.get_active_lots(from_id)
+            if not lots:
+                send_message(vk, peer_id,
+                             "📭 У вас нет активных лотов.\n\n"
+                             "💡 /продажа [список] — выставить товары\n"
+                             "💡 /лоты все — посмотреть рынок")
+                return
+            msg = "📦 Ваши активные лоты:\n\n"
+            for lot in lots:
+                msg += f"🆔 {lot['id']} | {format_lot_display(lot)}\n"
+            msg += "\n💡 /лот [ID] — подробная информация\n💡 /купить [ID] — купить лот"
+            send_message(vk, peer_id, msg)
+            increment_metric("lots_viewed")
 
     elif is_buy_cmd:
         if not args:
@@ -651,7 +732,7 @@ async def handle_message(event, vk):
                f"👤 Продавец: ID {lot['seller_id']}\n"
                f"👤 Покупатель: ID {from_id}\n\n"
                f"Команды:\n"
-               f"• /осмотр [ID] — проверить рейтинг\n"
+               f"• /осмотр — проверить рейтинг (ответьте на сообщение)\n"
                f"• /принять {deal_id} — согласиться (для обеих сторон)\n"
                f"• /отмена — отменить сделку")
         send_message(vk, peer_id, msg)
@@ -659,31 +740,29 @@ async def handle_message(event, vk):
 
     elif is_inspect_cmd:
         target_id = None
-        
-        # Сначала проверяем, есть ли ответ на сообщение
+
         reply_msg = msg.get('reply_message')
         if reply_msg:
             target_id = reply_msg.get('from_id')
-        
-        # Если ответа нет — пробуем ID из аргументов
+
         if not target_id:
             if not args:
-                send_message(vk, peer_id, 
-                            "❌ Укажите пользователя:\n"
-                            "• Ответьте на сообщение командой /осмотр\n"
-                            "• Или: /осмотр 123456789\n"
-                            "• Или: /осмотр @wodyano1")
+                send_message(vk, peer_id,
+                             "❌ Укажите пользователя:\n"
+                             "• Ответьте на сообщение командой /осмотр\n"
+                             "• Или: /осмотр 123456789\n"
+                             "• Или: /осмотр @wodyano1")
                 return
-            
+
             target_id, err = resolve_user_id(vk, args)
             if err:
                 send_message(vk, peer_id, err)
                 return
-        
+
         if not target_id:
             send_message(vk, peer_id, "❌ Не удалось определить пользователя")
             return
-        
+
         rating_msg = await get_user_rating_display(vk, target_id)
         send_message(vk, peer_id, rating_msg)
         increment_metric("users_inspected")
@@ -786,16 +865,16 @@ async def handle_message(event, vk):
     # ========== СПРАВКА ==========
     elif is_help_cmd:
         h = ("📖 Команды гильдии:\n"
-             "/добавить [текст] — внести запись (Капитан+)\n"
+             "/добавить — внести запись (Капитан+)\n"
              "/заметки — читать летопись (Все)\n"
-             "/удалить [номер] — удалить запись (Зам главы+)\n"
-             "/роль [@ник или id] [ранг] — назначить ранг (Глава)\n"
+             "/удалить — удалить запись (Зам главы+)\n"
+             "/роль — назначить ранг (Глава)\n"
              "/роли — посмотреть всех с ролями (Все)\n"
              "/мояроль — показать свой ранг\n"
              "/мут — заглушить пользователя (ответьте на сообщение)\n"
-             "/мут [@ник или id] [причина] — заглушить вручную (Глава/Зам/Кардинал)\n"
+             "/мут — заглушить вручную (Глава/Зам/Кардинал)\n"
              "/размут — снять заглушение (ответьте на сообщение)\n"
-             "/размут [@ник или id] — снять заглушение вручную (Глава/Зам/Кардинал)\n\n"
+             "/размут — снять заглушение вручную (Глава/Зам/Кардинал)\n\n"
              "🎖 Ранги: 👑 Глава → ⚔️ Зам → 📿 Кардинал → "
              "🛡️ Капитан → 🎖️ Лейтенант → 🪖 Рядовой\n\n"
              "🏰 Tower of Random:\n"
@@ -807,6 +886,8 @@ async def handle_message(event, vk):
              "🤝 Гарант сделок:\n"
              "• /продажа [список] — выставить товары\n"
              "• /лоты — мои товары\n"
+             "• /лоты все — все лоты на рынке (кратко)\n"
+             "• /лот [ID] — подробная информация о лоте\n"
              "• /купить [ID] — купить лот\n"
              "• /осмотр — рейтинг пользователя\n"
              "• /принять [ID] — согласиться на сделку\n"

@@ -32,7 +32,6 @@ class Database:
                 )
             """)
 
-            # Таблица ролей пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS user_roles (
                     user_id INTEGER PRIMARY KEY,
@@ -104,8 +103,6 @@ class Database:
             """)
 
             await db.commit()
-
-            # Миграция старой таблицы заметок (если была личная)
             await self._migrate_notes(db)
 
             await db.execute("CREATE INDEX IF NOT EXISTS idx_notes_author ON notes(author_id)")
@@ -322,7 +319,6 @@ class Database:
     # ==========================================
     async def create_lot(self, seller_id: int, item_name: str, item_level: str,
                          item_stats: str, price: int) -> int:
-        """Создание лота на продажу"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """INSERT INTO lots (seller_id, item_name, item_level, item_stats, price, status, created_at)
@@ -333,7 +329,7 @@ class Database:
             return cursor.lastrowid
 
     async def get_active_lots(self, seller_id: int = None) -> List[Dict]:
-        """Получение активных лотов"""
+        """Получение своих активных лотов"""
         async with aiosqlite.connect(self.db_path) as db:
             if seller_id:
                 cursor = await db.execute(
@@ -351,8 +347,22 @@ class Database:
                 for r in rows
             ]
 
+    async def get_all_active_lots(self) -> List[Dict]:
+        """Получение всех активных лотов на рынке"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """SELECT id, seller_id, item_name, price
+                   FROM lots WHERE status = 'active'
+                   ORDER BY id DESC LIMIT 50"""
+            )
+            rows = await cursor.fetchall()
+            return [
+                {"id": r[0], "seller_id": r[1], "item_name": r[2], "price": r[3]}
+                for r in rows
+            ]
+
     async def get_lot_by_id(self, lot_id: int) -> Optional[Dict]:
-        """Получение лота по ID"""
+        """Получение полного лота по ID"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("SELECT * FROM lots WHERE id = ?", (lot_id,))
             row = await cursor.fetchone()
@@ -365,7 +375,6 @@ class Database:
             return None
 
     async def link_lot_to_deal(self, lot_id: int, deal_id: int):
-        """Привязка лота к сделке"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "UPDATE lots SET deal_id = ?, status = 'in_deal' WHERE id = ?",
@@ -377,7 +386,6 @@ class Database:
     # ГАРАНТ: СДЕЛКИ
     # ==========================================
     async def create_deal(self, seller_id: int, buyer_id: int) -> int:
-        """Создание сделки"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 """INSERT INTO deals (seller_id, buyer_id, status, created_at)
@@ -388,7 +396,6 @@ class Database:
             return cursor.lastrowid
 
     async def get_deal_by_id(self, deal_id: int) -> Optional[Dict]:
-        """Получение сделки по ID"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("SELECT * FROM deals WHERE id = ?", (deal_id,))
             row = await cursor.fetchone()
@@ -399,7 +406,6 @@ class Database:
             return None
 
     async def update_deal_status(self, deal_id: int, status: str):
-        """Обновление статуса сделки"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("UPDATE deals SET status = ? WHERE id = ?", (status, deal_id))
             await db.commit()
@@ -408,7 +414,6 @@ class Database:
     # ГАРАНТ: РЕЙТИНГИ
     # ==========================================
     async def get_user_rating(self, user_id: int) -> Dict:
-        """Получение рейтинга пользователя"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute(
                 "SELECT * FROM user_ratings WHERE user_id = ?", (user_id,)
@@ -422,17 +427,13 @@ class Database:
             return {"total_deals": 0, "successful_deals": 0, "failed_deals": 0, "rating": 5.0}
 
     async def update_user_rating(self, user_id: int, success: bool):
-        """Обновление рейтинга после сделки"""
         async with aiosqlite.connect(self.db_path) as db:
             current = await self.get_user_rating(user_id)
             new_total = current['total_deals'] + 1
             new_success = current['successful_deals'] + (1 if success else 0)
             new_failed = current['failed_deals'] + (0 if success else 1)
-            
-            # +0.1 за успех, -0.3 за провал, ограничители 1.0 - 5.0
             new_rating = current['rating'] + (0.1 if success else -0.3)
             new_rating = max(1.0, min(5.0, new_rating))
-            
             await db.execute(
                 """INSERT OR REPLACE INTO user_ratings
                    (user_id, total_deals, successful_deals, failed_deals, rating)

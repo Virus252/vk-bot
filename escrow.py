@@ -13,7 +13,7 @@ def parse_price(price_str: str) -> int:
         return 0
     
     num = int(num_match.group(1))
-    if num_match.group(2):  # Если есть 'к', умножаем на 1000
+    if num_match.group(2):  
         num *= 1000
     
     return num
